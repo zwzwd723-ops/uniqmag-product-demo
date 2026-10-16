@@ -1,0 +1,42 @@
+/* Company identity stays in the sidebar; product brands stay with the catalog. */
+.product-brand-mark{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:88px;height:32px;overflow:hidden;padding:4px;background:#fff;border-radius:4px;color:#171717;vertical-align:middle;color-scheme:light}
+.product-brand-mark>img{display:block;width:100%;height:100%;object-fit:contain;filter:none}
+/* NEOCADE's source is a square sheet logo. Crop only its surrounding whitespace. */
+.product-brand-neocade>img{position:absolute;left:4px;top:50%;width:calc(100% - 8px);height:auto;max-height:none;object-fit:contain;transform:translateY(-47.22%)}
+.product-brand-unico>img{width:100%;height:100%;object-fit:contain}
+.product-brand-blazepro>img{width:100%;height:100%;object-fit:contain}
+.product-brand-custom{width:auto;max-width:160px;height:auto;min-height:30px;padding:5px 8px;font-size:11px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+.collection-brand-section{padding-bottom:20px;margin-bottom:20px;border-bottom:1px solid var(--line)}
+.collection-brand-section .collection-filter-heading{margin-bottom:13px}
+.portal-brand-chips{display:flex;flex-wrap:wrap;gap:9px;min-width:0}
+.brand-filter-chip{display:inline-flex;align-items:center;justify-content:space-between;gap:12px;min-width:120px;min-height:48px;max-width:100%;padding:7px 12px;border:1px solid var(--line);border-radius:7px;background:var(--surface,#fff);color:var(--text,#202020);font:inherit;font-size:12px;cursor:pointer;transition:border-color .15s,background-color .15s}
+.brand-filter-chip:hover{border-color:var(--text-secondary,#525252);background:var(--surface-soft,#f5f5f5)}
+.brand-filter-chip.active{border-color:var(--text,#202020);background:var(--surface-soft,#f5f5f5);box-shadow:inset 0 0 0 1px var(--text,#202020)}
+.brand-filter-chip:focus-visible{outline:2px solid var(--focus-ring,#525252);outline-offset:3px}
+.brand-filter-logo{width:94px;height:32px}
+.brand-filter-name{font-size:12px;line-height:1.5;text-align:left;overflow-wrap:anywhere}
+.brand-filter-count{display:inline-flex;align-items:center;justify-content:center;min-width:24px;min-height:22px;padding:1px 6px;border-radius:4px;background:var(--surface-hover,#ededed);color:var(--text-secondary,#525252);font-size:11px;font-variant-numeric:tabular-nums;flex:none}
+.collection-model-brand{display:flex;align-items:center;flex-wrap:wrap;gap:6px 9px;min-width:0;flex:1}
+.collection-model-brand>a{min-width:0;overflow-wrap:anywhere}
+.collection-card-heading>.badge{flex:none}
+.collection-brand-mark{width:74px;height:28px}
+.collection-model-brand .product-brand-custom{width:auto;max-width:135px;font-size:10px}
+.product-brand-heading{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:10px}
+.product-detail-brand{width:122px;height:43px}
+.product-brand-heading .product-brand-custom{width:auto;max-width:220px;font-size:13px}
+html[data-theme="dark"] .brand-filter-chip{border-color:var(--control-line);background:var(--surface-raised)}
+html[data-theme="dark"] .brand-filter-chip:hover{border-color:var(--text-secondary);background:var(--surface-hover)}
+html[data-theme="dark"] .brand-filter-chip.active{border-color:var(--text);background:var(--surface-hover)}
+html[data-theme="dark"] .brand-filter-count{background:var(--surface-soft);color:var(--text-secondary)}
+html[data-theme="dark"] .product-brand-mark{background:#fff;color:#171717}
+@media(max-width:760px){
+  .collection-brand-section{padding-bottom:17px;margin-bottom:17px}
+  .portal-brand-chips{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .brand-filter-chip{width:100%;min-width:0;min-height:46px;padding:6px 9px;gap:7px}
+  .brand-filter-logo{width:82px;max-width:calc(100% - 31px);height:30px}
+  .collection-model-brand{gap:5px 7px}
+  .collection-brand-mark{width:68px;height:25px}
+  .product-detail-brand{width:111px;height:40px}
+  .product-brand-heading{gap:10px}
+}
+@media(prefers-reduced-motion:reduce){.brand-filter-chip{transition:none}}

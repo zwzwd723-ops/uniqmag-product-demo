@@ -1,0 +1,36 @@
+/* Company selection lives in the existing brand area; navigation keeps its original layout. */
+.company-switcher{position:relative;width:100%;min-width:0}
+.company-switcher-trigger{display:block;width:100%;padding:0 10px 0 14px;border:0;background:transparent;color:var(--text);text-align:left;border-radius:6px}
+.company-switcher-brand{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:54px}
+.company-switcher-brand img{display:block;width:140px;height:54px;object-fit:contain;object-position:left center;min-width:0}
+.company-switcher-brand>svg{width:13px;height:13px;transform:rotate(90deg);color:var(--muted);transition:transform .15s}
+.company-switcher-trigger[aria-expanded="true"] .company-switcher-brand>svg{transform:rotate(-90deg)}
+.company-switcher-trigger:hover .company-switcher-brand>svg{color:var(--text)}
+.company-switcher-trigger[aria-busy="true"]{opacity:.55;cursor:progress}
+.company-switcher-caption{display:block;font:9px var(--display);letter-spacing:2.3px;color:var(--muted);margin-top:9px}
+.company-switcher-menu{position:absolute;top:calc(100% + 13px);left:0;z-index:60;width:250px;max-width:calc(100vw - 32px);padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:0 12px 36px #00000016}
+.company-switcher-label{padding:7px 9px 10px;font-size:11px;color:var(--muted)}
+.company-switcher-option{display:flex;align-items:center;gap:12px;width:100%;min-height:59px;border:0;border-radius:6px;background:transparent;color:var(--text);text-align:left;padding:10px;font-size:12px}
+.company-switcher-option:hover{background:var(--surface-soft,#f5f5f5)}
+.company-switcher-option.selected{background:var(--accent-light);font-weight:600}
+.company-option-logo{display:flex;align-items:center;justify-content:center;width:65px;height:32px;flex:none}
+.company-option-logo img{width:65px;height:32px;object-fit:contain}
+.company-switcher-option>svg,.company-option-check{width:15px;height:15px;margin-left:auto;flex:none}
+.company-switcher-note{border-top:1px solid var(--line);margin:7px 4px 0;padding:11px 5px 5px;font-size:10px;color:var(--muted);line-height:1.6}
+.company-brand-static img{height:54px;object-fit:contain;object-position:left center}
+[data-company-logo="unico"]{background:#fff;border-radius:3px;filter:none!important}
+html[data-theme="dark"] .company-switcher [data-company-logo="uniqmag"]{filter:invert(1)}
+html[data-theme="dark"] .company-switcher-option.selected{background:var(--surface-hover)}
+html[data-theme="dark"] .company-switcher-menu{box-shadow:0 12px 36px #0006}
+@media(max-width:900px) and (min-width:761px){.company-switcher-trigger{padding-left:5px;padding-right:3px}.company-switcher-brand img{width:132px}}
+@media(max-width:760px){
+  .company-switcher{width:175px;max-width:calc(100% - 80px)}
+  .company-switcher-trigger{padding:0 5px 0 0}
+  .company-switcher-brand{min-height:40px;gap:10px}
+  .company-switcher-brand img{width:123px;height:40px}
+  .company-switcher-caption{display:none}
+  .company-switcher-menu{top:calc(100% + 10px);width:250px}
+  .company-switcher-option{min-height:58px}
+  .company-brand-static img{height:40px}
+}
+@media(prefers-reduced-motion:reduce){.company-switcher-brand>svg{transition:none}}
