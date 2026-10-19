@@ -63,7 +63,7 @@
   L.dashboardData = (route, params) => {
     if (!L.state || !L.isStaff?.()) return null;
     if (permission[route] && !L.can?.(permission[route])) return null;
-    const products = list(L.state.products), assets = list(L.state.assets), templates = list(L.state.templates).filter(template => !['print','print-settings'].includes(template.kind));
+    const products = list(L.state.products), assets = list(L.state.assets), templates = list(L.state.templates).filter(template => !['print','print-settings','quotation-template','quotation-template-settings'].includes(template.kind));
     const jobs = list(L.state.jobs), live = published(products), now = Date.now();
 
     if (route === 'products' || route === 'portal') {
@@ -81,6 +81,12 @@
         [metric('有效', active), metric('已暂停', paused), metric('已过期', expired), metric('已撤销', revoked)], '本机数据 · 模拟邀请');
     }
     if (route === 'templates') {
+      if (parameter(params, 'tab') === 'quotation') {
+        const items=L.quotationTemplates?.list?.()||[],custom=items.filter(template=>!template.builtin);
+        const current=L.quotationTemplates?.get?.(L.quotationTemplates.defaultId());
+        return summary('报价模板配置',[metric('全部报价模板',items.length),metric('内置模板',1),metric('自定义模板',custom.length)],
+          [metric('内置模板',1),metric('自定义模板',custom.length)],`本机数据 · 默认：${current?.name||'标准报价模板'}`);
+      }
       if (parameter(params, 'tab') === 'print') {
         const custom = list(L.state.templates).filter(template => template.kind === 'print');
         const current = L.printTemplates?.get?.(L.printTemplates.defaultId());

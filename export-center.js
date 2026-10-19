@@ -41,7 +41,7 @@
   const safeError = e => e?.message || '操作未完成，请重试。';
   const now = () => new Date().toISOString();
   const fixed = t => !!TYPES[t.kind];
-  const excelTemplates = () => L.state.templates.filter(t=>t&&!['print','print-settings'].includes(t.kind));
+  const excelTemplates = () => L.state.templates.filter(t=>t&&!['print','print-settings','quotation-template','quotation-template-settings'].includes(t.kind));
   const nodeText = n => n?.textContent ?? '';
   const nodes = (d,n) => Array.from(d.getElementsByTagNameNS('*',n));
   function col(n) { let s=''; for(n++;n;n=Math.floor((n-1)/26)) s=String.fromCharCode(65+(n-1)%26)+s; return s; }
@@ -320,13 +320,19 @@
   }
   function renderTemplates(el, params=new URLSearchParams()) {
     if(!L.can('templates')){el.innerHTML='<div class="empty-state">当前身份没有模板管理权限。</div>';return;}
-    const printTab=params.get('tab')==='print';
+    const printTab=params.get('tab')==='print',quotationTab=params.get('tab')==='quotation';
     const admin=L.can('templates'),templates=excelTemplates(),defaultTemplates=templates.filter(fixed),custom=templates.filter(t=>!fixed(t));
-    const tabs=`<div class="tabs" role="tablist" aria-label="模板类型"><button type="button" role="tab" id="ex-template-tab-excel" aria-controls="ex-template-content" aria-selected="${!printTab}" class="${printTab?'':'active'}">资料导出模板</button><button type="button" role="tab" id="ex-template-tab-print" aria-controls="ex-template-content" aria-selected="${printTab}" class="${printTab?'active':''}">打印 / PDF 模板</button></div>`;
-    const banner=L.pageBanner({eyebrow:'EXPORT TEMPLATES',title:'导出模板',description:printTab?'管理产品打印与 PDF 的版式，下载样板后可修改上传。':'统一客户资料的版式与字段标准',actions:admin&&!printTab?'<button class="btn primary" id="ex-upload-template">＋ 上传 Excel 模板</button>':'',aside:`<div class="workspace-banner-stats"><div><strong>${defaultTemplates.length}</strong><span>固定模板</span></div><div><strong>${custom.length}</strong><span>公司模板</span></div></div>`});
-    el.innerHTML=banner+tabs+`<div id="ex-template-content" role="tabpanel" aria-labelledby="${printTab?'ex-template-tab-print':'ex-template-tab-excel'}"></div>`;
+    const tabs=`<div class="tabs" role="tablist" aria-label="模板类型"><button type="button" role="tab" id="ex-template-tab-excel" aria-controls="ex-template-content" aria-selected="${!printTab&&!quotationTab}" class="${printTab||quotationTab?'':'active'}">资料导出模板</button><button type="button" role="tab" id="ex-template-tab-print" aria-controls="ex-template-content" aria-selected="${printTab}" class="${printTab?'active':''}">打印 / PDF 模板</button><button type="button" role="tab" id="ex-template-tab-quotation" aria-controls="ex-template-content" aria-selected="${quotationTab}" class="${quotationTab?'active':''}">报价单模板</button></div>`;
+    const banner=L.pageBanner({eyebrow:'EXPORT TEMPLATES',title:'导出模板',description:quotationTab?'上传和管理报价单版式，生成 PDF 时自动填入客户、产品与报价。':printTab?'管理产品打印与 PDF 的版式，下载样板后可修改上传。':'统一客户资料的版式与字段标准',actions:admin&&!printTab&&!quotationTab?'<button class="btn primary" id="ex-upload-template">＋ 上传 Excel 模板</button>':'',aside:`<div class="workspace-banner-stats"><div><strong>${defaultTemplates.length}</strong><span>固定模板</span></div><div><strong>${custom.length}</strong><span>公司模板</span></div></div>`});
+    el.innerHTML=banner+tabs+`<div id="ex-template-content" role="tabpanel" aria-labelledby="${quotationTab?'ex-template-tab-quotation':printTab?'ex-template-tab-print':'ex-template-tab-excel'}"></div>`;
     el.querySelector('#ex-template-tab-excel').onclick=()=>L.go('templates');
     el.querySelector('#ex-template-tab-print').onclick=()=>L.go('templates?tab=print');
+    el.querySelector('#ex-template-tab-quotation').onclick=()=>L.go('templates?tab=quotation');
+    if(quotationTab){
+      if(L.quotationTemplates)L.quotationTemplates.renderManager(el.querySelector('#ex-template-content'));
+      else el.querySelector('#ex-template-content').innerHTML='<div class="empty-state">报价模板组件尚未加载，请刷新后重试。</div>';
+      return;
+    }
     if(printTab){
       L.printTemplates.renderManager(el.querySelector('#ex-template-content'));
       return;

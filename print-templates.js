@@ -53,6 +53,7 @@
     if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>4096||height>4096||width*height>8000000)throw new Error('Logo 图片无效，或尺寸超过 4096 像素 / 800 万像素。');
     return value;
   }
+  P.validateLogo=logo;
   function config(value){
     object(value,Object.keys(DEFAULT),'打印设置');
     if(!Number.isFinite(value.fontSize)||value.fontSize<9||value.fontSize>16||Math.round(value.fontSize*2)!==value.fontSize*2)throw new Error('字号需要在 9–16 px 之间，步进为 0.5。');

@@ -26,3 +26,7 @@
   .quotation-product-cell .quotation-thumb.image-placeholder{min-height:40px}
   .quotation-product-cell small{font-size:11px}
 }
+.quotation-template-picker{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:14px;max-width:680px}
+.quotation-template-picker select{width:100%;min-width:0}.quotation-template-picker .field{min-width:0}
+.quotation-export-reference{font-size:13px;overflow-wrap:anywhere;margin:0 0 18px;color:var(--muted)}
+@media(max-width:640px){.quotation-template-picker{grid-template-columns:1fr;gap:12px}.quotation-template-picker>.btn{justify-self:start}}

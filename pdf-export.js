@@ -52,33 +52,53 @@
       image.src=safe;
     });
   }
+  function layoutSettings(value){
+    if(value===undefined)return null;
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['orientation','fontSize','margin','footerText'].includes(key)))throw new Error('PDF 模板版式设置不正确。');
+    if(!['portrait','landscape'].includes(value.orientation))throw new Error('PDF 模板纸张方向须为纵向或横向。');
+    if(typeof value.fontSize!=='number'||!Number.isFinite(value.fontSize)||value.fontSize<8||value.fontSize>12)throw new Error('PDF 模板字号须为 8 至 12。');
+    if(!Number.isInteger(value.margin)||value.margin<12||value.margin>25)throw new Error('PDF 模板页边距须为 12 至 25 毫米的整数。');
+    if(typeof value.footerText!=='string'||[...value.footerText].length>120||/[\u0000-\u001f\u007f]/.test(value.footerText))throw new Error('PDF 模板页脚须为不超过 120 个字符的单行文字。');
+    return {orientation:value.orientation,fontSize:value.fontSize,margin:value.margin,footerText:value.footerText};
+  }
+  function imageColumn(value,count){
+    if(value===undefined)return 0;
+    if(!Number.isInteger(value)||value<0||value>=count)throw new Error('PDF 图片列位置无效。');
+    return value;
+  }
   function definition(spec,pictures,logo){
-    const count=spec.headers.length,landscape=count>6,pageWidth=landscape?841.89:595.28,available=pageWidth-64-count*12;
+    const count=spec.headers.length,layout=layoutSettings(spec.layout),photoColumn=imageColumn(spec.imageColumn,count),landscape=layout?layout.orientation==='landscape':count>6;
+    const pageWidth=landscape?841.89:595.28,sideMargin=layout?layout.margin*72/25.4:32,available=pageWidth-sideMargin*2-count*12;
     const raw=Array.isArray(spec.widths)&&spec.widths.length===count?spec.widths:Array(count).fill(1);
     const weights=raw.map(v=>typeof v==='number'&&Number.isFinite(v)&&v>0?v:1),sum=weights.reduce((a,b)=>a+b,0);
-    const widths=weights.map(v=>available*v/sum),fontSize=landscape?8:9;
+    const fontSize=layout?layout.fontSize:landscape?8:9;
+    // A custom layout keeps at least one CJK glyph in every column, even after reordering.
+    const minWidth=layout?fontSize+2:0,widths=weights.map(v=>minWidth+(available-minWidth*count)*v/sum);
     const body=[spec.headers.map(text=>({text:clean(text),bold:true,color:'#ffffff',fillColor:'#202020',margin:[0,4,0,4]}))];
     spec.rows.forEach((row,index)=>body.push(row.values.map((value,column)=>{
       const text={text:clean(value),margin:[0,2,0,2]};
-      if(column===0&&pictures[index])return {stack:[{image:pictures[index],fit:[Math.max(20,widths[0]-2),76],margin:[0,3,0,5]},text]};
+      if(column===photoColumn&&pictures[index])return {stack:[{image:pictures[index],fit:[Math.max(layout||spec.imageColumn!==undefined?1:20,widths[photoColumn]-2),76],margin:[0,3,0,5]},text]};
       return text;
     })));
     const title=clean(spec.title||'产品资料'),name=clean(spec.company.name);
     const content=[{text:title,fontSize:landscape?18:21,bold:true,margin:[0,0,0,landscape?3:5]}];
     if(spec.subtitle)content.push({text:clean(spec.subtitle),color:'#666666',fontSize:landscape?9:10,margin:[0,0,0,landscape?6:12]});
-    if(spec.meta?.length)content.push({table:{widths:['*','*'],body:Array.from({length:Math.ceil(spec.meta.length/2)},(_,r)=>[0,1].map(c=>{const item=spec.meta[r*2+c];return {text:item?[{text:clean(item.label)+'：',color:'#666666'},clean(item.value)]:'',margin:[0,0,0,landscape?3:5]};}))},layout:'noBorders',fontSize:landscape?8.5:fontSize,margin:[0,0,0,landscape?8:12]});
+    if(spec.meta?.length)content.push({table:{widths:['*','*'],body:Array.from({length:Math.ceil(spec.meta.length/2)},(_,r)=>[0,1].map(c=>{const item=spec.meta[r*2+c];return {text:item?[{text:clean(item.label)+'：',color:'#666666'},clean(item.value)]:'',margin:[0,0,0,landscape?3:5]};}))},layout:'noBorders',fontSize:layout?fontSize:landscape?8.5:fontSize,margin:[0,0,0,landscape?8:12]});
     content.push({table:{headerRows:1,keepWithHeaderRows:0,dontBreakRows:false,widths,body},layout:{hLineWidth:i=>i===1?0:.5,vLineWidth:()=>0,hLineColor:()=>'#dddddd',paddingLeft:()=>6,paddingRight:()=>6,paddingTop:()=>landscape?4:5,paddingBottom:()=>landscape?4:5,fillColor:i=>i>0&&i%2===0?'#f5f5f5':null}});
-    if(spec.totals?.length)content.push({table:{widths:['*',120],body:spec.totals.map(item=>[{text:clean(item.label),alignment:'right',bold:true},{text:clean(item.value),alignment:'right',bold:true}])},layout:'noBorders',margin:[0,14,0,8],fontSize:11});
-    if(spec.notes?.length)content.push({text:'备注 / Notes',bold:true,fontSize:10,margin:[0,14,0,5]},{stack:spec.notes.map(note=>({text:clean(note),margin:[0,0,0,5]})),color:'#555555',fontSize:9});
-    return {pageSize:'A4',pageOrientation:landscape?'landscape':'portrait',pageMargins:[32,landscape?62:78,32,landscape?32:42],defaultStyle:{font:'NotoSC',fontSize,lineHeight:landscape?1.08:1.18,color:'#202020'},info:{title,author:name,creator:name+' Product Library',subject:clean(spec.subtitle||title)},compress:true,
-      header:()=>({margin:[32,landscape?16:22,32,0],stack:[{columns:[logo?{image:logo,fit:landscape?[118,26]:[132,34],width:150}:{text:name,bold:true,fontSize:19,width:150},{text:title,alignment:'right',color:'#777777',fontSize:9,margin:[8,9,0,0]}]},{canvas:[{type:'line',x1:0,y1:8,x2:pageWidth-64,y2:8,lineWidth:.7,lineColor:'#303030'}]}]}),
-      footer:(page,total)=>({columns:[{text:name,color:'#777777'},{text:`${page} / ${total}`,alignment:'right',color:'#777777'}],fontSize:8,margin:[32,15,32,0]}),content};
+    if(spec.totals?.length)content.push({table:{widths:['*',120],body:spec.totals.map(item=>[{text:clean(item.label),alignment:'right',bold:true},{text:clean(item.value),alignment:'right',bold:true}])},layout:'noBorders',margin:[0,14,0,8],fontSize:layout?Math.max(fontSize,11):11});
+    if(spec.notes?.length)content.push({text:'备注 / Notes',bold:true,fontSize:layout?Math.max(fontSize,10):10,margin:[0,14,0,5]},{stack:spec.notes.map(note=>({text:clean(note),margin:[0,0,0,5]})),color:'#555555',fontSize:layout?fontSize:9});
+    // The requested margin is the outer safe area. Reserve extra space for the repeated logo and footer.
+    const pageMargins=layout?[sideMargin,sideMargin+(landscape?46:56),sideMargin,sideMargin+48]:[32,landscape?62:78,32,landscape?32:42];
+    return {pageSize:'A4',pageOrientation:landscape?'landscape':'portrait',pageMargins,defaultStyle:{font:'NotoSC',fontSize,lineHeight:landscape?1.08:1.18,color:'#202020'},info:{title,author:name,creator:name+' Product Library',subject:clean(spec.subtitle||title)},compress:true,
+      header:()=>({margin:[sideMargin,layout?sideMargin:landscape?16:22,sideMargin,0],stack:[{columns:[logo?{image:logo,fit:landscape?[118,26]:[132,34],width:150}:{text:name,bold:true,fontSize:19,width:150},{text:title,alignment:'right',color:'#777777',fontSize:9,margin:[8,9,0,0]}]},{canvas:[{type:'line',x1:0,y1:8,x2:pageWidth-sideMargin*2,y2:8,lineWidth:.7,lineColor:'#303030'}]}]}),
+      footer:(page,total)=>({columns:layout?[{text:layout.footerText,width:'*',color:'#777777'},{text:`${page} / ${total}`,width:50,alignment:'right',color:'#777777'}]:[{text:name,color:'#777777'},{text:`${page} / ${total}`,alignment:'right',color:'#777777'}],fontSize:8,margin:[sideMargin,layout?8:15,sideMargin,0]}),content};
   }
   async function build(spec,{validate,progress=()=>{}}={}){
     if(typeof validate!=='function')throw new Error('PDF 导出缺少权限校验。');
     await validate();
     if(!spec?.company?.id||!Array.isArray(spec.headers)||spec.headers.length<1||spec.headers.length>12||!Array.isArray(spec.rows)||!spec.rows.length||spec.rows.length>2000)throw new Error('PDF 资料范围不完整或超过 2000 行，请分批导出。');
     if(spec.rows.some(row=>!Array.isArray(row.values)||row.values.length!==spec.headers.length))throw new Error('PDF 表格列数不一致。');
+    layoutSettings(spec.layout);imageColumn(spec.imageColumn,spec.headers.length);
     // Snapshot content before asynchronous work; the caller rechecks live authorization and revisions.
     const snapshot=structuredClone(spec);progress(3);await pause();await validate();
     const [engine,vfs]=await Promise.all([loadEngine(),loadFonts()]);await validate();progress(22);
