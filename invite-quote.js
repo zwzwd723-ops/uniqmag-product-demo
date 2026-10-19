@@ -95,5 +95,81 @@
     el.innerHTML=`<article class="customer-quote" aria-labelledby="customer-quote-title"><header class="customer-quote-header"><div class="customer-quote-brand"><img src="${brand.logo}" alt="${brand.name}" data-company-logo="${brand.id}"></div><div class="customer-quote-heading"><p>QUOTATION</p><h1 id="customer-quote-title">客户报价</h1></div></header><section class="customer-quote-info" aria-label="报价信息"><div><span>客户名称</span><strong>${esc(customer)}</strong>${contact?`<small>${esc(contact)}</small>`:''}</div><div><span>报价编号</span><strong>${esc(quote.number)}</strong></div><div><span>有效期至</span><strong>${esc(quote.validUntil)}</strong></div><div><span>币种</span><strong>${esc(quote.currency)}</strong></div></section>${expired?'<p class="customer-quote-expired" role="status">报价已过有效期，请联系业务人员确认。</p>':''}<div class="customer-quote-table-wrap"><table class="customer-quote-table"><caption>产品报价明细</caption><thead><tr><th scope="col">产品 / 配色</th><th scope="col">单价</th><th scope="col">数量</th><th scope="col">金额</th></tr></thead><tbody>${rows}</tbody></table></div><div class="customer-quote-total"><span>报价总额 <small>${quote.lines.length} 个明细</small></span><strong>${esc(quote.currency)} ${money(quote.totalCents)}</strong></div>${quote.notes?`<section class="customer-quote-notes" aria-label="报价备注"><h2>备注</h2><p>${esc(quote.notes)}</p></section>`:''}<footer class="customer-quote-footer">此页面为分享时的报价副本，更新后需重新发送链接。最终价格请与业务人员确认。</footer></article>`;
     return quote;
   }
-  L.inviteQuote=Object.freeze({normalize,renderReadOnly,money,safeImage:image,companies:COMPANIES,currencies:CURRENCIES,maxLines:MAX_LINES});
+  function renderCatalog(el,envelope){
+    if(!el||!record(envelope))throw new Error('报价页面无法显示，请重新打开链接。');
+    const brand=company(envelope.companyId),quote=normalize(envelope.quotation,{companyId:brand.id});
+    const customer=text(envelope.customer,'客户名称',100,true),contact=text(envelope.contact,'联系人',60);
+    const expiresAt=typeof envelope.expiresAt==='string'?Date.parse(envelope.expiresAt):NaN;
+    const quoteEnd=Date.parse(`${quote.validUntil}T23:59:59.999+08:00`);
+    const snapshot={companyId:brand.id,customer,contact,quotation:quote};
+    const groups=[];const byProduct=new Map();
+    quote.lines.forEach(line=>{
+      let group=byProduct.get(line.productId);
+      if(!group){group={productId:line.productId,lines:[],active:0};byProduct.set(line.productId,group);groups.push(group);}
+      group.lines.push(line);
+    });
+    let view='products',detailIndex=0;
+    const raw=value=>`<span data-no-translate>${esc(value)}</span>`;
+    const amount=line=>money(price(line.unitPrice)*quantity(line.quantity));
+    const unitPrice=line=>`<span class="quote-catalog-currency" data-no-translate>${esc(quote.currency)}</span><strong data-no-translate>${money(price(line.unitPrice))}</strong>`;
+    function ensureActive(){
+      if(!Number.isFinite(expiresAt)||!Number.isFinite(quoteEnd))throw new Error('报价链接有效期不正确，请索取新链接。');
+      if(Math.min(expiresAt,quoteEnd)<=Date.now())throw new Error('这份报价副本已过有效期，请联系业务人员获取最新报价。');
+    }
+    const logo=()=>`<img src="${brand.logo}" alt="${brand.name}" data-company-logo="${brand.id}">`;
+    const artwork=(line,lazy=true)=>line.image?`<img src="${esc(line.image)}" alt="${esc(line.name)}" ${lazy?'loading="lazy"':''} data-no-translate>`:'<span class="quote-catalog-no-image">图片待补充</span>';
+    const variants=(group,index)=>`<div class="quote-catalog-variants" role="group" aria-label="选择报价配色">${group.lines.map((line,i)=>`<button type="button" class="quote-catalog-variant" data-quote-catalog-action="variant" data-quote-group="${index}" data-quote-line="${i}" aria-pressed="${group.active===i}"><span data-no-translate>${esc(line.color||line.sku||line.skuId)}</span></button>`).join('')}</div>`;
+    const footer=()=>'<footer class="quote-catalog-footer">此页面为分享时的报价副本，更新后需重新发送链接。最终价格请与业务人员确认。</footer>';
+    const notes=()=>quote.notes?`<section class="quote-catalog-notes"><h2>报价备注</h2><p data-no-translate>${esc(quote.notes)}</p></section>`:'';
+    function navigation(){
+      return `<header class="quote-catalog-nav"><div class="quote-catalog-brand">${logo()}</div><nav aria-label="报价资料导航"><button type="button" data-quote-catalog-action="products" class="quote-catalog-nav-item" ${view!=='summary'?'aria-current="page"':''}>产品资料库</button><button type="button" data-quote-catalog-action="summary" class="quote-catalog-nav-item" ${view==='summary'?'aria-current="page"':''}>报价汇总</button></nav></header>`;
+    }
+    function intro(){
+      return `<section class="quote-catalog-intro" aria-labelledby="quote-catalog-title"><div class="quote-catalog-intro-copy"><p class="quote-catalog-eyebrow">客户专属报价</p><h1 id="quote-catalog-title">产品资料库</h1><p class="quote-catalog-description">浏览已报价产品，查看配色与专属价格。</p><dl class="quote-catalog-context"><div><dt>客户</dt><dd data-no-translate>${esc(customer)}${contact?` · ${esc(contact)}`:''}</dd></div><div><dt>报价编号</dt><dd data-no-translate>${esc(quote.number)}</dd></div><div><dt>有效期至</dt><dd data-no-translate>${esc(quote.validUntil)}</dd></div></dl></div><div class="quote-catalog-overview"><span>报价总额</span><strong data-no-translate>${esc(quote.currency)} ${money(quote.totalCents)}</strong><small>${groups.length} 个产品 · ${quote.lines.length} 个报价配色</small><button type="button" class="quote-catalog-summary-link" data-quote-catalog-action="summary">查看报价汇总 <span aria-hidden="true">→</span></button></div></section>`;
+    }
+    function card(group,index){
+      const line=group.lines[group.active];
+      return `<article class="quote-catalog-card" data-quote-card="${index}"><button type="button" class="quote-catalog-image-button" data-quote-catalog-action="detail" data-quote-group="${index}" aria-label="查看产品详情">${artwork(line)}<span class="quote-catalog-image-link">查看详情 <span aria-hidden="true">↗</span></span></button><div class="quote-catalog-card-body"><div class="quote-catalog-product-title">${line.brand?`<p data-no-translate>${esc(line.brand)}</p>`:''}<h2><button type="button" data-quote-catalog-action="detail" data-quote-group="${index}" data-no-translate>${esc(line.name)}</button></h2></div>${variants(group,index)}<p class="quote-catalog-sku">SKU <span data-no-translate>${esc(line.sku||line.skuId)}</span></p><div class="quote-catalog-card-price"><span class="quote-catalog-price-label">客户单价</span><div class="quote-catalog-unit-price">${unitPrice(line)}</div></div><div class="quote-catalog-card-totals"><span><small>报价数量</small>${raw(line.quantity)}</span><span><small>本项小计</small>${raw(quote.currency+' '+amount(line))}</span></div></div></article>`;
+    }
+    function products(){
+      return `${intro()}<div class="quote-catalog-section-heading"><h2>已报价产品</h2><span>${groups.length} 个产品</span></div><section class="quote-catalog-grid" aria-label="已报价产品">${groups.map(card).join('')}</section>${notes()}${footer()}`;
+    }
+    function detail(){
+      const group=groups[detailIndex],line=group.lines[group.active];
+      return `<div class="quote-catalog-detail-toolbar"><button type="button" class="quote-catalog-back" data-quote-catalog-action="products"><span aria-hidden="true">←</span> 返回产品资料库</button><span>客户专属报价</span></div><section class="quote-catalog-detail" aria-labelledby="quote-catalog-detail-title"><div class="quote-catalog-detail-image">${artwork(line,false)}</div><div class="quote-catalog-detail-copy">${line.brand?`<p class="quote-catalog-eyebrow" data-no-translate>${esc(line.brand)}</p>`:''}<h1 id="quote-catalog-detail-title" tabindex="-1" data-no-translate>${esc(line.name)}</h1><p class="quote-catalog-detail-sku">SKU ${raw(line.sku||line.skuId)}</p><div class="quote-catalog-detail-variants"><h2>报价配色</h2>${variants(group,detailIndex)}</div><div class="quote-catalog-detail-price"><span class="quote-catalog-price-label">客户单价</span><div class="quote-catalog-unit-price">${unitPrice(line)}</div><div class="quote-catalog-detail-totals"><div><span>报价数量</span><strong data-no-translate>${esc(line.quantity)}</strong></div><div><span>本项小计</span><strong data-no-translate>${esc(quote.currency)} ${amount(line)}</strong></div></div></div><dl class="quote-catalog-detail-context"><div><dt>客户</dt><dd data-no-translate>${esc(customer)}</dd></div>${contact?`<div><dt>联系人</dt><dd data-no-translate>${esc(contact)}</dd></div>`:''}<div><dt>报价编号</dt><dd data-no-translate>${esc(quote.number)}</dd></div><div><dt>有效期至</dt><dd data-no-translate>${esc(quote.validUntil)}</dd></div></dl><button type="button" class="quote-catalog-summary-link" data-quote-catalog-action="summary">查看报价汇总 <span aria-hidden="true">→</span></button></div></section>${notes()}${footer()}`;
+    }
+    function expired(error){
+      el.innerHTML=`<section class="customer-quote quote-share-error" role="alert"><div class="quote-catalog-brand">${logo()}</div><h1>报价暂不可用</h1><p>${esc(error.message)}</p><p class="muted">请联系为您提供链接的业务人员。</p></section>`;
+    }
+    function paint(focusSelector){
+      ensureActive();
+      el.innerHTML=`<div class="quote-catalog">${navigation()}${view==='summary'?'<div class="quote-catalog-summary"><div data-quote-sheet></div></div>':view==='detail'?detail():products()}</div>`;
+      if(view==='summary'){
+        const target=el.querySelector?.('[data-quote-sheet]');
+        if(target)renderReadOnly(target,snapshot);
+      }
+      if(focusSelector)el.querySelector?.(focusSelector)?.focus?.({preventScroll:true});
+    }
+    // Every view change rechecks expiry. No catalog, employee session or storage is consulted.
+    el.onclick=event=>{
+      const button=event.target?.closest?.('[data-quote-catalog-action]');
+      if(!button||el.contains&&!el.contains(button))return;
+      event.preventDefault?.();
+      try{
+        ensureActive();
+        const action=button.dataset.quoteCatalogAction;
+        if(action==='summary'){view='summary';paint('.quote-catalog-nav-item[aria-current="page"]');}
+        else if(action==='products'){view='products';paint('.quote-catalog-nav-item[aria-current="page"]');}
+        else if(action==='detail'||action==='variant'){
+          const groupIndex=Number(button.dataset.quoteGroup),lineIndex=Number(button.dataset.quoteLine),group=groups[groupIndex];
+          if(!Number.isInteger(groupIndex)||!group)return;
+          if(action==='detail'){detailIndex=groupIndex;view='detail';paint('#quote-catalog-detail-title');}
+          else {if(!Number.isInteger(lineIndex)||!group.lines[lineIndex])return;group.active=lineIndex;paint(`[data-quote-catalog-action="variant"][data-quote-group="${groupIndex}"][data-quote-line="${lineIndex}"]`);}
+        }
+      }catch(error){expired(error);}
+    };
+    try{paint();}catch(error){expired(error);}
+    return quote;
+  }
+  L.inviteQuote=Object.freeze({normalize,renderReadOnly,renderCatalog,money,safeImage:image,companies:COMPANIES,currencies:CURRENCIES,maxLines:MAX_LINES});
 })();

@@ -393,12 +393,12 @@
       ${quoted?`<div class="invite-detail-quotation"><span>${e(invite.quotation.number)} · ${ids(invite.quotation.lines).length} 项明细</span><strong>${e(invite.quotation.currency)} ${e(L.quotationTools.money(invite.quotation.totalCents))}</strong><small class="muted">报价有效期：${e(invite.quotation.validUntil)}，与访问截止时间以较早者为准。</small></div>`:''}
       <p class="muted invite-small" data-invite-access-policy>${e(customerAccessPolicy(invite))}</p>
       <label class="field"><span>${quoted?'客户报价链接':'邀请链接'}</span><textarea id="invite-link-value" rows="3" readonly>${e(shareURL)}</textarea></label>
-      ${quoted?`<details class="invite-local-link"><summary>本机资料库演示邀请</summary><p class="muted invite-small">以下邀请码与资料库邀请仅在当前浏览器有效。上方客户报价链接只展示本次报价，不开放资料库权限。</p><label class="field"><span>本机资料库邀请链接</span><textarea rows="2" readonly>${e(accessURL(invite))}</textarea></label>`:''}
+      ${quoted?`<details class="invite-local-link"><summary>本机资料库演示邀请</summary><p class="muted invite-small">以下邀请码与资料库邀请仅在当前浏览器有效。上方客户报价链接可浏览本次报价产品与专属价格，素材权限由原资料库邀请控制。</p><label class="field"><span>本机资料库邀请链接</span><textarea rows="2" readonly>${e(accessURL(invite))}</textarea></label>`:''}
       <div class="invite-link-code"><span>邀请码</span><code id="invite-link-code">${e(invite.code)}</code></div>
       ${quoted?'</details>':''}
       <div class="notice invite-small">${quoted?'链接内含本次报价，客户无需登录即可查看，持有人可以转发。改价后需重新复制链接；暂停、重置或撤销本地邀请不会撤回已发出的报价。':'当前仅在同一浏览器、同一网站地址下预览。正式分享资料库访问权限需接入后端。'}</div>
-      <p class="muted invite-small" id="invite-copy-status" aria-live="polite">${quoted?'将完整报价链接发给客户，即可查看单价、数量和总额。':'链接已包含邀请码，打开后可直接进入客户访问页面。'}</p>
-      <div class="invite-modal-actions"><button class="btn" id="invite-open-link" ${active ? '' : 'disabled'}>${quoted?'预览客户报价':'预览客户访问'}</button><button class="btn primary" id="invite-copy-link" ${active ? '' : 'disabled'}>${L.icon('link')}${quoted?'复制客户报价链接':'复制链接'}</button></div>
+      <p class="muted invite-small" id="invite-copy-status" aria-live="polite">${quoted?'客户打开链接后，可在产品卡片和详情中查看专属价格，也可切换到报价汇总。':'链接已包含邀请码，打开后可直接进入客户访问页面。'}</p>
+      <div class="invite-modal-actions"><button class="btn" id="invite-open-link" ${active ? '' : 'disabled'}>${quoted?'预览客户资料库':'预览客户访问'}</button><button class="btn primary" id="invite-copy-link" ${active ? '' : 'disabled'}>${L.icon('link')}${quoted?'复制客户报价链接':'复制链接'}</button></div>
       ${active ? '' : `<p class="invite-form-error">${e(linkError||'此邀请当前不可访问，请检查状态与有效期。')}</p>`}
     </div>`);
     const textarea = dialog.querySelector('#invite-link-value');

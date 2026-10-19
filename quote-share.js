@@ -71,7 +71,7 @@
       const value=decode(params.get('share'),params.get('company'));
       if(Date.parse(value.expiresAt)<=Date.now())throw new Error('这份报价副本已过有效期，请联系业务人员获取最新报价。');
       document.title=`客户报价 · ${value.companyId==='unico'?'UNICO':'UNIQMAG'}`;
-      L.inviteQuote.renderReadOnly(el,value);
+      (L.inviteQuote.renderCatalog||L.inviteQuote.renderReadOnly)(el,value);
       const check=()=>{
         if(!el.isConnected||location.hash.replace(/^#\/?/,'').split('?')[0]!=='quote')return;
         if(Date.parse(value.expiresAt)<=Date.now()){render(el,params);return;}
