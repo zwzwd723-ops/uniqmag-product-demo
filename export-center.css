@@ -142,3 +142,14 @@ html[data-theme] .ex-export-dialog .ex-stepper .ex-step-label {
 .ex-format-picker b { font-size:14px; }
 .ex-format-picker small { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
 @media (max-width:600px) { .ex-format-picker { grid-template-columns:1fr; } }
+.ex-language-picker { min-width:0; padding:0; border:0; margin:0 0 22px; }
+.ex-language-picker legend { padding:0; margin-bottom:10px; font-size:14px; font-weight:600; }
+.ex-language-options { display:flex; gap:10px; flex-wrap:wrap; }
+.ex-language-options label { display:flex; align-items:center; gap:9px; min-height:42px; min-width:124px; padding:10px 16px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); cursor:pointer; }
+.ex-language-options label.active { border-color:var(--text); background:var(--bg); }
+.ex-language-options input { margin:0; accent-color:var(--text); }
+.ex-language-picker .ex-caption { margin:9px 0 0; }
+.ex-file-language { margin-left:auto; }
+.ex-file-language b { font-weight:500; color:var(--text); }
+.ex-document-preview { min-width:0; }
+@media (max-width:600px) { .ex-file-language { margin-left:0; flex-basis:100%; } }

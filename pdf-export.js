@@ -80,13 +80,13 @@
       if(column===photoColumn&&pictures[index])return {stack:[{image:pictures[index],fit:[Math.max(layout||spec.imageColumn!==undefined?1:20,widths[photoColumn]-2),76],margin:[0,3,0,5]},text]};
       return text;
     })));
-    const title=clean(spec.title||'产品资料'),name=clean(spec.company.name);
+    const english=spec.language==='en',title=clean(spec.title||(english?'Product information':'产品资料')),name=clean(spec.company.name);
     const content=[{text:title,fontSize:landscape?18:21,bold:true,margin:[0,0,0,landscape?3:5]}];
     if(spec.subtitle)content.push({text:clean(spec.subtitle),color:'#666666',fontSize:landscape?9:10,margin:[0,0,0,landscape?6:12]});
-    if(spec.meta?.length)content.push({table:{widths:['*','*'],body:Array.from({length:Math.ceil(spec.meta.length/2)},(_,r)=>[0,1].map(c=>{const item=spec.meta[r*2+c];return {text:item?[{text:clean(item.label)+'：',color:'#666666'},clean(item.value)]:'',margin:[0,0,0,landscape?3:5]};}))},layout:'noBorders',fontSize:layout?fontSize:landscape?8.5:fontSize,margin:[0,0,0,landscape?8:12]});
+    if(spec.meta?.length)content.push({table:{widths:['*','*'],body:Array.from({length:Math.ceil(spec.meta.length/2)},(_,r)=>[0,1].map(c=>{const item=spec.meta[r*2+c];return {text:item?[{text:clean(item.label)+(english?': ':'：'),color:'#666666'},clean(item.value)]:'',margin:[0,0,0,landscape?3:5]};}))},layout:'noBorders',fontSize:layout?fontSize:landscape?8.5:fontSize,margin:[0,0,0,landscape?8:12]});
     content.push({table:{headerRows:1,keepWithHeaderRows:0,dontBreakRows:false,widths,body},layout:{hLineWidth:i=>i===1?0:.5,vLineWidth:()=>0,hLineColor:()=>'#dddddd',paddingLeft:()=>6,paddingRight:()=>6,paddingTop:()=>landscape?4:5,paddingBottom:()=>landscape?4:5,fillColor:i=>i>0&&i%2===0?'#f5f5f5':null}});
     if(spec.totals?.length)content.push({table:{widths:['*',120],body:spec.totals.map(item=>[{text:clean(item.label),alignment:'right',bold:true},{text:clean(item.value),alignment:'right',bold:true}])},layout:'noBorders',margin:[0,14,0,8],fontSize:layout?Math.max(fontSize,11):11});
-    if(spec.notes?.length)content.push({text:'备注 / Notes',bold:true,fontSize:layout?Math.max(fontSize,10):10,margin:[0,14,0,5]},{stack:spec.notes.map(note=>({text:clean(note),margin:[0,0,0,5]})),color:'#555555',fontSize:layout?fontSize:9});
+    if(spec.notes?.length)content.push({text:english?'Notes':'备注 / Notes',bold:true,fontSize:layout?Math.max(fontSize,10):10,margin:[0,14,0,5]},{stack:spec.notes.map(note=>({text:clean(note),margin:[0,0,0,5]})),color:'#555555',fontSize:layout?fontSize:9});
     // The requested margin is the outer safe area. Reserve extra space for the repeated logo and footer.
     const pageMargins=layout?[sideMargin,sideMargin+(landscape?46:56),sideMargin,sideMargin+48]:[32,landscape?62:78,32,landscape?32:42];
     return {pageSize:'A4',pageOrientation:landscape?'landscape':'portrait',pageMargins,defaultStyle:{font:'NotoSC',fontSize,lineHeight:landscape?1.08:1.18,color:'#202020'},info:{title,author:name,creator:name+' Product Library',subject:clean(spec.subtitle||title)},compress:true,

@@ -6,6 +6,10 @@
   const clone=value=>structuredClone(value);
   const clock=()=>new Date().toISOString();
   const company=()=>L.company();
+  const fileLanguage=value=>L.documentLanguage?.normalize(value??window.LibraryPreferences?.language)||(/^en(?:$|[-_])/i.test(value??window.LibraryPreferences?.language??'')?'en':'zh-CN');
+  const documentWords={'产品报价单':'Product quotation','产品图片':'Product image','产品 / SKU':'Product / SKU','配色':'Color','数量':'Quantity','单价':'Unit price','金额':'Amount','客户名称':'Customer','联系人':'Contact','报价日期':'Quotation date','有效期至':'Valid until','报价币种':'Currency','合计':'Total'};
+  const documentText=(value,language)=>L.documentLanguage?.t(value,language)??(fileLanguage(language)==='en'?(documentWords[value]??value):value);
+  const languageOptions=language=>`<option value="zh-CN" ${fileLanguage(language)==='zh-CN'?'selected':''}>中文</option><option value="en" ${fileLanguage(language)==='en'?'selected':''}>English</option>`;
   const today=(offset=0)=>{const d=new Date();d.setDate(d.getDate()+offset);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
   const newNumber=()=>`QT-${today().replaceAll('-','')}-${L.uid('q').split('-').slice(-1)[0].slice(-6).toUpperCase()}`;
   function access(expected){
@@ -46,12 +50,17 @@
     const d=new Date(`${raw}T12:00:00Z`);if(!/^\d{4}-\d{2}-\d{2}$/.test(raw)||Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==raw)throw new Error(`${label}不是有效日期。`);return raw;
   }
   function availableRows(){access();return L.liveProducts().flatMap(p=>(p.variants||[]).map(v=>({p,v})));}
-  function snapshot(p,v){return {productId:p.id,skuId:v.id,name:String(p.name||p.id),type:String(p.type||''),brand:String(L.productBrand?.(p)?.name||p.brand||''),sku:String(v.sku||''),color:String(v.colorLabel||v.color||''),image:L.safeURL(v.images?.[0]||'')||''};}
+  function snapshot(p,v){
+    const result={productId:p.id,skuId:v.id,name:String(p.name||p.id),type:String(p.type||''),brand:String(L.productBrand?.(p)?.name||p.brand||''),sku:String(v.sku||''),color:String(v.colorLabel||v.color||''),image:L.safeURL(v.images?.[0]||'')||''};
+    const productEn=L.documentLanguage?.product(p,'en'),variantEn=L.documentLanguage?.variant(v,'en');
+    for(const [key,value] of [['name',productEn?.name],['type',productEn?.type],['color',variantEn?.colorLabel||variantEn?.color]])if(typeof value==='string'&&value!==result[key])result[key+'En']=value;
+    return result;
+  }
   function fromSelection(selection=[]){
     const rows=availableRows(),seen=new Set();
     return selection.map(selected=>{const key=`${selected.productId}:${selected.skuId}`;if(seen.has(key))return null;seen.add(key);const row=rows.find(r=>r.p.id===selected.productId&&r.v.id===selected.skuId);if(!row)throw new Error('选中的产品或配色尚未发布，请重新选择。');return {id:L.uid('ql'),snapshot:snapshot(row.p,row.v),quantity:'1',unitPrice:''};}).filter(Boolean);
   }
-  function newDraft(selection=[]){const c=access();return {id:L.uid('quote'),companyId:c.companyId,ownerId:c.memberId,number:newNumber(),customer:'',contact:'',currency:'USD',date:today(),validUntil:today(30),notes:'',pdfTemplateId:L.quotationTemplates?.defaultId()||'quotation-default',lines:fromSelection(selection),revision:0};}
+  function newDraft(selection=[]){const c=access();return {id:L.uid('quote'),companyId:c.companyId,ownerId:c.memberId,number:newNumber(),customer:'',contact:'',currency:'USD',date:today(),validUntil:today(30),notes:'',language:fileLanguage(),pdfTemplateId:L.quotationTemplates?.defaultId()||'quotation-default',lines:fromSelection(selection),revision:0};}
   function normalize(input,{complete=false,stored=null,copySource=null}={}){
     const c=access(),number=text(input.number,'报价编号',80,complete),customer=text(input.customer,'客户名称',160,complete),contact=text(input.contact,'联系人',160),notes=text(input.notes,'备注',3000);
     if(!CURRENCIES.includes(input.currency))throw new Error('请选择支持的报价币种。');
@@ -71,7 +80,7 @@
     });
     const totals=amounts(lines,complete),pdfTemplateId=text(input.pdfTemplateId||stored?.pdfTemplateId||L.quotationTemplates?.defaultId()||'quotation-default','报价模板',100,true);
     if(L.quotationTemplates)L.quotationTemplates.resolve(pdfTemplateId);else if(pdfTemplateId!=='quotation-default')throw new Error('报价模板组件尚未加载，请刷新后重试。');
-    return {id:stored?.id||input.id,companyId:c.companyId,ownerId:stored?.ownerId||c.memberId,number,customer,contact,currency:input.currency,date,validUntil,notes,pdfTemplateId,lines,totalCents:totals.pending?null:totals.total,status:'draft',revision:(stored?.revision||0)+1,createdAt:stored?.createdAt||clock(),updatedAt:clock()};
+    return {id:stored?.id||input.id,companyId:c.companyId,ownerId:stored?.ownerId||c.memberId,number,customer,contact,currency:input.currency,date,validUntil,notes,language:fileLanguage(input.language??stored?.language??copySource?.language),pdfTemplateId,lines,totalCents:totals.pending?null:totals.total,status:'draft',revision:(stored?.revision||0)+1,createdAt:stored?.createdAt||clock(),updatedAt:clock()};
   }
   async function persist(input,{copySourceId=null}={}){
     if(saving)throw new Error('正在保存报价单，请稍候。');
@@ -96,27 +105,28 @@
     finally{saving=false;}
   }
   async function copyQuotation(id){const c=access(),original=clone(readRecord(id,c));original.id=L.uid('quote');original.number=newNumber();original.date=today();original.validUntil=today(30);original.revision=0;return persist(original,{copySourceId:id});}
-  function pdfSpec(quote,templateId){
+  function pdfSpec(quote,templateId,language=quote.language){
+    language=fileLanguage(language);const t=value=>documentText(value,language);
     const values=amounts(quote.lines,true),selectedId=templateId||quote.pdfTemplateId;
     const template=L.quotationTemplates?.resolve(selectedId),config=template?.config;
     if(!template&&selectedId&&selectedId!=='quotation-default')throw new Error('报价模板组件尚未加载，请刷新后重试。');
     const columns=config?.columns||[{key:'image',label:'产品图片',width:14},{key:'product',label:'产品 / SKU',width:30},{key:'color',label:'配色',width:16},{key:'quantity',label:'数量',width:10},{key:'unitPrice',label:'单价',width:15},{key:'amount',label:'金额',width:15}];
     const imageColumn=columns.findIndex(column=>column.key==='image');
-    const spec={company:{...clone(company()),...(config?.logoData?{logo:config.logoData}:{})},title:config?.title||'产品报价单',subtitle:quote.number,
-      meta:[{label:'客户名称',value:quote.customer},{label:'联系人',value:quote.contact||'—'},{label:'报价日期',value:quote.date},{label:'有效期至',value:quote.validUntil},{label:'报价币种',value:quote.currency}],
-      headers:columns.map(column=>column.label+(['unitPrice','amount'].includes(column.key)?` (${quote.currency})`:'')),widths:columns.map(column=>column.width),
-      rows:quote.lines.map((line,index)=>{const fields={image:'',product:[line.snapshot.brand,line.snapshot.name,line.snapshot.sku].filter(Boolean).join('\n'),color:line.snapshot.color,quantity:String(line.quantity),unitPrice:money(parsePrice(line.unitPrice)),amount:money(values.rows[index])};return {values:columns.map(column=>fields[column.key]),image:imageColumn>=0?line.snapshot.image||undefined:undefined};}),
-      totals:[{label:`合计 (${quote.currency})`,value:money(values.total)}],notes:quote.notes?[quote.notes]:[]};
-    if(config){spec.layout={orientation:config.orientation,fontSize:config.fontSize,margin:config.margin,footerText:config.footerText};if(imageColumn>=0)spec.imageColumn=imageColumn;}
+    const spec={language,company:{...clone(company()),...(config?.logoData?{logo:config.logoData}:{})},title:t(config?.title||'产品报价单'),subtitle:quote.number,
+      meta:[{label:t('客户名称'),value:quote.customer},{label:t('联系人'),value:quote.contact||'—'},{label:t('报价日期'),value:quote.date},{label:t('有效期至'),value:quote.validUntil},{label:t('报价币种'),value:quote.currency}],
+      headers:columns.map(column=>t(column.label)+(['unitPrice','amount'].includes(column.key)?` (${quote.currency})`:'')),widths:columns.map(column=>column.width),
+      rows:quote.lines.map((line,index)=>{const product=L.documentLanguage?.product(line.snapshot,language)||line.snapshot,variant=L.documentLanguage?.variant(line.snapshot,language)||line.snapshot;const fields={image:'',product:[product.brand,product.name,product.sku].filter(Boolean).join('\n'),color:variant.color,quantity:String(line.quantity),unitPrice:money(parsePrice(line.unitPrice)),amount:money(values.rows[index])};return {values:columns.map(column=>fields[column.key]),image:imageColumn>=0?line.snapshot.image||undefined:undefined};}),
+      totals:[{label:`${t('合计')} (${quote.currency})`,value:money(values.total)}],notes:quote.notes?[quote.notes]:[]};
+    if(config){spec.layout={orientation:config.orientation,fontSize:config.fontSize,margin:config.margin,footerText:t(config.footerText)};if(imageColumn>=0)spec.imageColumn=imageColumn;}
     return spec;
   }
-  async function exportPDF(id,{progress,templateId}={}){
-    const c=access(),quote=clone(readRecord(id,c));normalize({...quote,pdfTemplateId:templateId||quote.pdfTemplateId},{complete:true,stored:quote});
+  async function exportPDF(id,{progress,templateId,language}={}){
+    const c=access(),quote=clone(readRecord(id,c)),selectedLanguage=fileLanguage(language??quote.language);normalize({...quote,language:selectedLanguage,pdfTemplateId:templateId||quote.pdfTemplateId},{complete:true,stored:quote});
     if(!L.pdfExport?.build)throw new Error('PDF 组件尚未加载，请刷新后重试。');
     const selected=L.quotationTemplates?.resolve(templateId||quote.pdfTemplateId),selectedId=selected?.id||templateId||quote.pdfTemplateId;
     const templateSignature=selected?JSON.stringify([selected.id,selected.version,selected.config]):null;
     const revision=quote.revision,validate=()=>{access(c);const current=readRecord(id,c);if(current.revision!==revision)throw new Error('报价单在生成期间已更新，请重新导出。');if(templateSignature){const currentTemplate=L.quotationTemplates.resolve(selectedId);if(JSON.stringify([currentTemplate.id,currentTemplate.version,currentTemplate.config])!==templateSignature)throw new Error('报价模板在生成期间已更新，请重新导出。');}};
-    validate();const blob=await L.pdfExport.build(pdfSpec(quote,selectedId),{validate,progress});validate();
+    validate();const blob=await L.pdfExport.build(pdfSpec(quote,selectedId,selectedLanguage),{validate,progress});validate();
     L.download(blob,`${company().name}_${quote.number||'报价单'}.pdf`);return blob;
   }
   function errorAt(el,error){let box=el.querySelector('.quotation-error');if(!box){box=document.createElement('div');box.className='quotation-error';box.setAttribute('role','alert');el.prepend(box);}box.textContent=error?.message||'操作未完成，请重试。';box.scrollIntoView?.({block:'nearest'});}
@@ -125,17 +135,17 @@
     return (selectedId&&!items.some(item=>item.id===selectedId)?`<option value="${E(selectedId)}" selected disabled>原模板不可用，请重新选择</option>`:'')+items.map(item=>`<option value="${E(item.id)}" ${item.id===selectedId?'selected':''}>${E(item.name)}</option>`).join('');
   }
   function templateEditor(draft){
-    return `<section class="panel quotation-section"><div class="quotation-section-heading"><div><h2>报价单版式</h2><p>上传的报价模板可用于生成 PDF，产品、单价和总额由报价单自动填入。</p></div>${L.can('templates')?'<a class="btn small" href="#/templates?tab=quotation">管理报价模板</a>':''}</div><div class="quotation-template-picker"><label class="field"><span>报价单模板</span><select name="pdfTemplateId" id="quote-template" aria-label="报价单模板">${templateOptions(draft.pdfTemplateId)}</select></label><button type="button" class="btn" id="quote-template-preview">查看版式示例</button></div></section>`;
+    return `<section class="panel quotation-section"><div class="quotation-section-heading"><div><h2>报价单版式</h2><p>上传的报价模板可用于生成 PDF，产品、单价和总额由报价单自动填入。</p></div>${L.can('templates')?'<a class="btn small" href="#/templates?tab=quotation">管理报价模板</a>':''}</div><div class="quotation-template-picker"><label class="field"><span>报价单模板</span><select name="pdfTemplateId" id="quote-template" aria-label="报价单模板">${templateOptions(draft.pdfTemplateId)}</select></label><label class="field"><span>文件语言</span><select name="language" id="quote-language" aria-label="文件语言" data-no-translate>${languageOptions(draft.language)}</select></label><button type="button" class="btn" id="quote-template-preview">查看版式示例</button></div><p class="quotation-language-note">文件语言独立保存；自定义内容没有英文资料时保留原文。</p></section>`;
   }
   function openPDFExport(id){
     const c=access(),quote=readRecord(id,c),selectedId=quote.pdfTemplateId||L.quotationTemplates?.defaultId()||'quotation-default';
-    const d=L.modal('导出报价 PDF',`<p class="quotation-export-reference" data-no-translate>${E(quote.number)} · ${E(quote.customer)}</p><label class="field"><span>报价单模板</span><select id="quote-export-template" aria-label="报价单模板">${templateOptions(selectedId)}</select><small>选择本次 PDF 使用的版式，报价内容与金额保持一致。</small></label><div class="modal-actions"><button type="button" class="btn" data-cancel>取消</button><button type="button" class="btn primary" data-download>下载 PDF</button></div>`);
+    const d=L.modal('导出报价 PDF',`<p class="quotation-export-reference" data-no-translate>${E(quote.number)} · ${E(quote.customer)}</p><label class="field"><span>报价单模板</span><select id="quote-export-template" aria-label="报价单模板">${templateOptions(selectedId)}</select><small>选择本次 PDF 使用的版式，报价内容与金额保持一致。</small></label><label class="field"><span>文件语言</span><select id="quote-export-language" aria-label="文件语言" data-no-translate>${languageOptions(quote.language)}</select><small>仅用于本次文件；没有英文资料的自定义内容保留原文。</small></label><div class="modal-actions"><button type="button" class="btn" data-cancel>取消</button><button type="button" class="btn primary" data-download>下载 PDF</button></div>`);
     d.querySelector('[data-cancel]').onclick=()=>d.close();
     d.querySelector('[data-download]').onclick=async()=>{
-      const button=d.querySelector('[data-download]'),select=d.querySelector('#quote-export-template');button.disabled=true;select.disabled=true;
-      try{access(c);await exportPDF(id,{templateId:select.value});if(d.isConnected)d.close();L.toast('报价 PDF 已下载');}
+      const button=d.querySelector('[data-download]'),select=d.querySelector('#quote-export-template'),language=d.querySelector('#quote-export-language');button.disabled=true;select.disabled=true;language.disabled=true;
+      try{access(c);await exportPDF(id,{templateId:select.value,language:language.value});if(d.isConnected)d.close();L.toast('报价 PDF 已下载');}
       catch(error){if(d.isConnected)errorAt(d.querySelector('.modal-body'),error);else L.toast(error.message);}
-      finally{button.disabled=false;select.disabled=false;}
+      finally{button.disabled=false;select.disabled=false;language.disabled=false;}
     };
     return d;
   }
@@ -157,7 +167,7 @@
     };el.querySelector('#quote-search').oninput=e=>{query=e.target.value;try{paint();}catch(error){errorAt(el,error);}};paint();
   }
   function renderEditor(el,input){
-    const c=access();let draft=clone(input);draft.pdfTemplateId=draft.pdfTemplateId||L.quotationTemplates?.defaultId()||'quotation-default';let baseline=!draft.revision&&draft.lines.length?'':JSON.stringify(draft),busy=false;
+    const c=access();let draft=clone(input);draft.language=fileLanguage(draft.language);draft.pdfTemplateId=draft.pdfTemplateId||L.quotationTemplates?.defaultId()||'quotation-default';let baseline=!draft.revision&&draft.lines.length?'':JSON.stringify(draft),busy=false;
     L.isDirty=()=>JSON.stringify(draft)!==baseline;
     const check=()=>{access(c);if(records(c).some(q=>q.id===draft.id)){const stored=readRecord(draft.id,c);if(stored.revision!==draft.revision)throw new Error('报价单已更新，请重新打开。');}};
     const field=(name,label,type='text',max=160)=>`<label class="field"><span>${label}</span><input name="${name}" type="${type}" maxlength="${max}" value="${E(draft[name])}" ${['customer','number','date','validUntil'].includes(name)?'aria-required="true"':''}></label>`;

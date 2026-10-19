@@ -5,6 +5,19 @@
   const E = value => L.esc(value ?? '');
   const clone = value => structuredClone(value);
   const now = () => new Date().toISOString();
+  function normalizeWarehouse(value){
+    if(value==null)value={};
+    if(typeof value!=='object'||Array.isArray(value))throw new Error('仓库字段格式不正确。');
+    const location=value.location??'';
+    if(typeof location!=='string'||[...location].length>120||/[\u0000-\u001f\u007f]/.test(location))throw new Error('仓库须为不超过 120 个字符的单行文字。');
+    return {...value,location:location.trim()};
+  }
+  function catalogContext(permission,expected){
+    if(!L.isStaff()||!L.can(permission))throw new Error('当前角色无此操作权限。');
+    const context={state:L.state,companyId:L.companyId(),memberId:L.currentMember?.()?.id,role:L.currentRole?.(),permission};
+    if(expected&&(context.state!==expected.state||context.companyId!==expected.companyId||context.memberId!==expected.memberId||context.role!==expected.role))throw new Error('公司主体或登录身份已改变，请重新打开产品资料。');
+    return context;
+  }
   const statuses = {published:'已发布',draft:'草稿',review:'待发布',archived:'已下架'};
   const usages = {product:'产品主图',detail:'详情页',packaging:'包装图',lifestyle:'场景图',barcode:'条码',manual:'说明书',source:'源文件',other:'其他'};
   const sourceImage = p => p.variants?.flatMap(v => v.images || [])[0];
@@ -74,14 +87,24 @@
     }catch(error){L.toast(error.message);}
   }
   const activeUploadDialog=dialog=>dialog.isConnected&&dialog.open&&L.isStaff()&&L.can('upload');
-  async function commit(changes, action, target,canNotify=()=>true) {
-    const permission=Object.hasOwn(changes,'products')?'edit':'upload';
-    if(!guard(permission))return false;
-    const previous = {}, logBefore = L.state.logs.slice();
-    Object.keys(changes).forEach(key=>{previous[key]=L.state[key];L.state[key]=changes[key];});
+  async function commit(changes, action, target,canNotify=()=>true,expected) {
+    const permission=expected?.permission||(Object.hasOwn(changes,'products')?'edit':'upload');
+    let context;try{context=catalogContext(permission,expected);}catch(error){if(canNotify())L.toast(error.message);return false;}
+    const state=context.state,previous = {},written={}, logBefore = state.logs.slice();
+    Object.keys(changes).forEach(key=>{previous[key]=state[key];written[key]=new Map(changes[key].map(item=>[item.id,JSON.stringify(item)]));state[key]=changes[key];});
     L.log(action,target);
-    try { await L.save(); return L.isStaff()&&L.can(permission); }
-    catch(error) { Object.assign(L.state,previous); L.state.logs=logBefore; if(canNotify())L.toast('保存失败：'+(error.message||'浏览器存储空间不足，请减少文件大小。')); return false; }
+    const ownLogs=state.logs.filter(entry=>!logBefore.includes(entry)).map(entry=>entry.id);
+    try { await L.save(); catalogContext(permission,context);return true; }
+    catch(error) {
+      for(const key of Object.keys(changes)){
+        if(Array.isArray(state[key])&&Array.isArray(previous[key])){
+          const before=new Map(previous[key].map(item=>[item.id,item]));
+          state[key]=state[key].flatMap(item=>written[key].get(item.id)===JSON.stringify(item)?before.has(item.id)?[before.get(item.id)]:[]:[item]);
+        }
+      }
+      state.logs=state.logs.filter(entry=>!ownLogs.includes(entry.id));
+      if(canNotify())L.toast('保存失败：'+(error.message||'浏览器存储空间不足，请减少文件大小。'));return false;
+    }
   }
   function referencedURLs(p) { return new Set([...(p.variants||[]).flatMap(v=>[...(v.images||[]),v.barcodeImage]),...(p.packaging||[]).map(x=>x.image),...(p.details||[]).map(x=>x.url)].filter(Boolean)); }
   function updateProductList(p) { return L.state.products.some(x=>x.id===p.id) ? L.state.products.map(x=>x.id===p.id?p:x) : [...L.state.products,p]; }
@@ -97,6 +120,7 @@
     });
   }
   function validateProduct(p) {
+    try{normalizeWarehouse(p.warehouse);}catch(error){return error.message;}
     if (!p.name?.trim()) return '请填写产品名称。';
     if (!p.variants?.length) return '请至少添加一个颜色 / SKU 版本。';
     const values=p.variants.map(v=>v.sku?.trim().toLowerCase()).filter(Boolean);
@@ -105,20 +129,22 @@
     if(values.some(v=>others.has(v)))return '此 SKU 已用于其他产品，请核对。';
     return '';
   }
-  async function saveProduct(p,mode='draft') {
+  async function saveProduct(p,mode='draft',expected) {
     if(!guard(mode==='published'?'publish':'edit'))return false;
+    let context;try{context=catalogContext(mode==='published'?'publish':'edit',expected);}catch(error){L.toast(error.message);return false;}
     const error=validateProduct(p); if(error){L.toast(error);return false;}
-    const draft=clone(p); draft.updatedAt=now();
+    const draft=clone(p);draft.warehouse=normalizeWarehouse(p.warehouse);draft.updatedAt=now();
     if(mode==='published')L.publishProduct(draft);else draft.status=mode;
-    if(await commit({products:updateProductList(draft),assets:linkedAssets(draft,mode==='published')},mode==='published'?'发布产品':'保存产品草稿',draft.name)){
+    if(await commit({products:updateProductList(draft),assets:linkedAssets(draft,mode==='published')},mode==='published'?'发布产品':'保存产品草稿',draft.name,()=>true,context)){
       L.toast(mode==='published'?'产品已发布到本机客户预览。':'草稿已保存，客户预览保持原发布版本。');return true;
     }
     return false;
   }
-  function confirmPublish(p,onDone) {
+  function confirmPublish(p,onDone,expected) {
     if(!guard('publish'))return;
+    let context;try{context=catalogContext('publish',expected);}catch(error){L.toast(error.message);return;}
     const count=L.state.assets.filter(a=>referencedURLs(p).has(a.url)&&a.status!=='archived'&&a.status!=='published').length;
-    L.confirm('发布此产品',`将以当前资料更新客户预览版本，并一同发布 ${count} 份引用素材。已有邀请的授权范围不会自动增加。${(p.issues||[]).length?'此产品仍有原表待核实项，请确认已保留准确的提示。':''}`,async()=>{if(await saveProduct(p,'published'))onDone?.();});
+    L.confirm('发布此产品',`将以当前资料更新客户预览版本，并一同发布 ${count} 份引用素材。已有邀请的授权范围不会自动增加。${(p.issues||[]).length?'此产品仍有原表待核实项，请确认已保留准确的提示。':''}`,async()=>{if(await saveProduct(p,'published',context))onDone?.();});
   }
   function withdrawProduct(id,onDone){
     if(!guard('publish'))return;const product=productById(id);if(!product?.isLive){L.toast('该产品当前未发布。');return;}
@@ -149,11 +175,11 @@
     };
     drawRows();
   }
-  function newProduct(){return{id:L.uid('product'),name:'',brand:L.companyId()==='uniqmag'?'UNIQMAG':'',category:'other',categoryLabel:L.categoryName('other'),type:'',description:'',tags:[],specs:[],variants:[{id:L.uid('sku'),sku:null,color:'',colorLabel:'',swatch:'#bfc0c7',images:[]}],packaging:[],issues:[],details:[],status:'draft',isLive:false};}
+  function newProduct(){return{id:L.uid('product'),name:'',brand:L.companyId()==='uniqmag'?'UNIQMAG':'',category:'other',categoryLabel:L.categoryName('other'),type:'',description:'',tags:[],specs:[],variants:[{id:L.uid('sku'),sku:null,color:'',colorLabel:'',swatch:'#bfc0c7',images:[]}],packaging:[],issues:[],details:[],warehouse:normalizeWarehouse(),status:'draft',isLive:false};}
   function renderEditor(el,params,{onDone,onCancel}={}){
     const id=params.get('id'),original=id?productById(id):null;
     if(id&&!original){el.innerHTML=empty('该产品不存在。');return;}
-    const p=clone(original||newProduct());let tab=['basic','specs','variants','packaging'].includes(params.get('tab'))?params.get('tab'):'basic',dirty=false;const readonly=!L.can('edit');L.isDirty=()=>dirty;
+    const p=clone(original||newProduct()),context={state:L.state,companyId:L.companyId(),memberId:L.currentMember?.()?.id,role:L.currentRole?.()};let tab=['basic','specs','variants','packaging'].includes(params.get('tab'))?params.get('tab'):'basic',dirty=false,busy=false;const readonly=!L.can('edit');L.isDirty=()=>dirty;
     el.innerHTML=`<div class="cat-editor-top"><button class="btn" id="cat-back">← ${onCancel?'返回产品详情':'产品资料库'}</button><div class="cat-editor-name"><strong>${E(p.name||'新增产品')}</strong>${badge(p)}</div><button class="btn" id="cat-save" ${readonly?'disabled':''}>保存草稿</button>${L.can('publish')?'<button class="btn primary" id="cat-editor-publish">保存并发布</button>':''}</div><div class="notice">${p.isLive?'当前编辑内容将另存为草稿；客户继续看到原发布版本。':'新产品先保存在当前浏览器，发布后可在客户预览中查看。'}${readonly?' 当前角色只能查看资料。':''}</div><div class="tabs cat-editor-tabs">${[['basic','基本资料'],['specs','产品规格'],['variants','颜色 / SKU'],['packaging','包装资料']].map(([k,v])=>`<button data-tab="${k}" ${k===tab?'class="active"':''}>${v}</button>`).join('')}</div><div id="cat-editor-body"></div>`;
     const body=el.querySelector('#cat-editor-body');body.addEventListener('input',()=>{if(!readonly)dirty=true;});
     function sync(){
@@ -161,10 +187,11 @@
       if(tab==='specs')body.querySelectorAll('[data-spec]').forEach(row=>{const s=p.specs[Number(row.dataset.spec)];s.label=row.querySelector('[name=label]').value.trim();s.key=row.querySelector('[name=key]').value.trim();s.value=row.querySelector('[name=value]').value;s.pending=row.querySelector('[name=pending]').checked;});
       if(tab==='variants')body.querySelectorAll('[data-variant]').forEach(row=>{const v=p.variants[Number(row.dataset.variant)];v.sku=row.querySelector('[name=sku]').value.trim()||null;v.color=row.querySelector('[name=color]').value.trim()||null;v.colorLabel=row.querySelector('[name=colorLabel]').value.trim();v.swatch=row.querySelector('[name=swatch]').value;});
       if(tab==='packaging')body.querySelectorAll('[data-pack]').forEach(row=>{const v=p.packaging[Number(row.dataset.pack)];v.title=row.querySelector('[name=title]').value.trim();v.text=row.querySelector('[name=text]').value;v.appliesTo=row.querySelector('[name=appliesTo]').value.trim()||null;v.pending=row.querySelector('[name=pending]').checked;});
+      if(tab==='basic')p.warehouse={...p.warehouse,location:body.querySelector('[name=warehouseLocation]').value};
     }
     function draw(){
       el.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-      if(tab==='basic')body.innerHTML=`<div class="cat-edit-layout"><section class="panel cat-editor-panel"><h3>基本资料</h3><div class="form-grid">${field('产品名称 *','name',p.name)}${brandField(p)}<label class="field"><span>产品类型分类</span><select name="category">${L.getCategories().map(c=>`<option value="${E(c.id)}" ${L.categoryKey(p)===c.id?'selected':''}>${E(c.name)}</option>`).join('')}</select></label>${field('具体类型','type',p.type)}${field('标签（逗号分隔）','tags',(p.tags||[]).join('，'))}<label class="field full"><span>产品简介</span><textarea name="description" rows="4" placeholder="简要描述产品特点，客户将在产品卡片与详情页看到">${E(p.description)}</textarea></label></div></section><aside class="panel cat-editor-aside"><div class="cat-edit-cover">${L.image(sourceImage(p),p.name||'产品主图')}</div><h3>产品资料检查</h3><div class="cat-check-item"><span>颜色 / SKU</span><strong>${p.variants.length}</strong></div><div class="cat-check-item"><span>规格字段</span><strong>${p.specs.length}</strong></div><div class="cat-check-item"><span>包装资料</span><strong>${p.packaging.length}</strong></div><p class="muted">在“颜色 / SKU”中设置产品图片。未提供的资料可保持空白。</p></aside></div>${(p.issues||[]).length?`<section class="panel cat-editor-panel cat-source-issues"><h3>原表待核实事项</h3>${p.issues.map(i=>`<div><span class="badge amber">待核实</span><strong>${E(i.field)}</strong><p>${E(i.message)}</p></div>`).join('')}</section>`:''}`;
+      if(tab==='basic')body.innerHTML=`<div class="cat-edit-layout"><section class="panel cat-editor-panel"><h3>基本资料</h3><div class="form-grid">${field('产品名称 *','name',p.name)}${brandField(p)}<label class="field"><span>产品类型分类</span><select name="category">${L.getCategories().map(c=>`<option value="${E(c.id)}" ${L.categoryKey(p)===c.id?'selected':''}>${E(c.name)}</option>`).join('')}</select></label>${field('具体类型','type',p.type)}<label class="field"><span>仓库</span><input name="warehouseLocation" maxlength="120" value="${E(p.warehouse?.location||'')}" placeholder="未填写"></label>${field('标签（逗号分隔）','tags',(p.tags||[]).join('，'))}<label class="field full"><span>产品简介</span><textarea name="description" rows="4" placeholder="简要描述产品特点，客户将在产品卡片与详情页看到">${E(p.description)}</textarea></label></div></section><aside class="panel cat-editor-aside"><div class="cat-edit-cover">${L.image(sourceImage(p),p.name||'产品主图')}</div><h3>产品资料检查</h3><div class="cat-check-item"><span>颜色 / SKU</span><strong>${p.variants.length}</strong></div><div class="cat-check-item"><span>规格字段</span><strong>${p.specs.length}</strong></div><div class="cat-check-item"><span>包装资料</span><strong>${p.packaging.length}</strong></div><p class="muted">在“颜色 / SKU”中设置产品图片。未提供的资料可保持空白。</p></aside></div>${(p.issues||[]).length?`<section class="panel cat-editor-panel cat-source-issues"><h3>原表待核实事项</h3>${p.issues.map(i=>`<div><span class="badge amber">待核实</span><strong>${E(i.field)}</strong><p>${E(i.message)}</p></div>`).join('')}</section>`:''}`;
       if(tab==='specs')body.innerHTML=`<section class="panel cat-editor-panel"><div class="cat-section-head"><div><h3>产品规格</h3><p class="muted">保留原始事实；存在疑问的参数可标记为待核实。</p></div><button class="btn" id="cat-add-spec">＋ 添加字段</button></div><div class="cat-specs">${p.specs.map((s,i)=>`<div class="cat-spec-row" data-spec="${i}">${field('显示名称','label',s.label)}${field('字段名称','key',s.key)}${field('参数值','value',s.value)}<label class="check-row"><input type="checkbox" name="pending" ${s.pending?'checked':''}>待核实</label><button class="icon-btn" data-remove-spec="${i}" aria-label="删除 ${E(s.label)}">×</button></div>`).join('')||empty('还没有规格字段。点击“添加字段”开始填写。')}</div></section>`;
       if(tab==='variants')body.innerHTML=`<section class="panel cat-editor-panel"><div class="cat-section-head"><div><h3>颜色 / SKU</h3><p class="muted">每个颜色版本有独立的货号和图片；货号未提供时保持空白。</p></div><button class="btn" id="cat-add-variant">＋ 添加版本</button></div><div class="cat-variant-edit-grid">${p.variants.map((v,i)=>`<div class="cat-variant-edit" data-variant="${i}"><div class="cat-variant-image">${L.image(v.images?.[0],v.colorLabel||'版本图片')}<button class="btn small" data-pick-variant="${i}">＋ 添加图片</button></div><div class="cat-image-strip">${(v.images||[]).map((url,j)=>`<div><button data-main-image="${i}:${j}" title="${j===0?'当前主图':'设为主图'}" aria-label="${j===0?'当前主图':'设为主图'}">${L.image(url,'版本图片 '+(j+1))}${j===0?'<span>主图</span>':''}</button><button data-remove-image="${i}:${j}" aria-label="移除版本图片 ${j+1}">×</button></div>`).join('')}</div><div class="form-grid">${field('SKU 货号','sku',v.sku)}${field('颜色原名','color',v.color)}${field('颜色显示名','colorLabel',v.colorLabel)}${field('色块','swatch',/^#[0-9a-f]{6}$/i.test(v.swatch||'')?v.swatch:'#bfc0c7','color')}</div><div class="cat-variant-footer"><span class="muted">${v.images?.length||0} 张图片 · 点击缩略图设为主图</span><button class="btn small" data-remove-variant="${i}">移除此版本</button></div></div>`).join('')}</div></section>`;
       if(tab==='packaging')body.innerHTML=`<section class="panel cat-editor-panel"><div class="cat-section-head"><div><h3>包装资料</h3><p class="muted">可填写零售、快递、整箱等包装，并明确适用 SKU。</p></div><button class="btn" id="cat-add-pack">＋ 添加包装</button></div>${p.id==='UQ68'?'<div class="notice">原表快递包装仅适用于 UQ68KB，编辑时请保留适用范围。</div>':''}<div class="cat-pack-grid">${p.packaging.map((v,i)=>`<div class="cat-pack-edit" data-pack="${i}"><div class="cat-pack-image">${L.image(v.image,v.title||'包装图')}<button class="btn small" data-pick-pack="${i}">选择包装图</button></div><div class="cat-pack-fields"><div class="form-grid">${field('包装名称','title',v.title)}${field('适用 SKU（空白为通用）','appliesTo',v.appliesTo)}</div><label class="field"><span>包装内容 / 尺寸 / 重量</span><textarea name="text" rows="5">${E(v.text)}</textarea></label><div class="cat-section-head"><label class="check-row"><input name="pending" type="checkbox" ${v.pending?'checked':''}>待核实</label><button class="btn small" data-remove-pack="${i}">删除包装项</button></div></div></div>`).join('')||empty('尚未录入包装资料。')}</div></section>`;
@@ -180,11 +207,11 @@
       body.querySelectorAll('[data-remove-pack]').forEach(b=>b.onclick=()=>{sync();p.packaging.splice(Number(b.dataset.removePack),1);dirty=true;draw();});
       body.querySelectorAll('[data-pick-pack]').forEach(b=>b.onclick=()=>{sync();pickImage(p.id,asset=>{p.packaging[Number(b.dataset.pickPack)].image=asset.url;dirty=true;draw();});});
     }
-    el.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{sync();tab=b.dataset.tab;draw();});
+    el.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{if(busy)return;sync();tab=b.dataset.tab;draw();});
     function done(){dirty=false;L.isDirty=null;if(onDone)onDone(p.id);else L.go('/product?id='+encodeURIComponent(p.id));}
     el.querySelector('#cat-back').onclick=()=>{if(!onCancel){L.go('/products');return;}const leave=()=>{dirty=false;L.isDirty=null;onCancel(p.id);};if(dirty)L.confirm('放弃未保存的修改', '返回后，本次尚未保存的产品修改将被放弃。',leave);else leave();};
-    el.querySelector('#cat-save').onclick=async()=>{sync();if(await saveProduct(p))done();};
-    el.querySelector('#cat-editor-publish')?.addEventListener('click',()=>{sync();confirmPublish(p,done);});draw();
+    el.querySelector('#cat-save').onclick=async()=>{if(busy)return;sync();busy=true;const button=el.querySelector('#cat-save');button.disabled=true;try{if(await saveProduct(p,'draft',context))done();}finally{busy=false;button.disabled=readonly;}};
+    el.querySelector('#cat-editor-publish')?.addEventListener('click',()=>{if(busy)return;sync();confirmPublish(p,done,context);});draw();if(params.get('tab')==='warehouse')body.querySelector('[name=warehouseLocation]')?.focus();
   }
   function pickImage(productId,onPick){
     const dialog=L.modal('从素材库选择图片',`<div class="toolbar"><input class="search-input" id="cat-picker-search" aria-label="搜索图片素材" placeholder="搜索文件名"><button class="btn" id="cat-picker-upload" ${!L.can('upload')?'disabled':''}>上传新图片</button></div><p class="muted">可选用未归档图片；保存产品时自动关联所选素材。</p><div class="cat-picker-grid" id="cat-picker-items"></div>`,{wide:true});
@@ -348,7 +375,7 @@
     dialog.querySelector('#cat-asset-archive').onclick=()=>{if(!guard('upload'))return;L.closeModal();L.confirm(a.status==='archived'?'恢复素材':'归档素材',a.status==='archived'?'素材将恢复为草稿，可重新选择使用。':'归档后，此素材不能被客户在线浏览，也不会出现在新的图片选择中。已发布产品内嵌的图片仍保留；要移除展示，请修改并重新发布产品。',async()=>{if(!guard('upload'))return;const next={...a,status:a.status==='archived'?'draft':'archived',updatedAt:now()};if(await commit({assets:L.state.assets.map(x=>x.id===a.id?next:x)},'更改素材状态',a.name)){L.toast('素材状态已更新。');L.render();}});};
   }
   function renderDetailEditor(el,params,{onDone,onCancel}={}){
-    const id=params.get('id')||L.state.products[0]?.id,p=clone(productById(id)||{});
+    const id=params.get('id')||L.state.products[0]?.id,p=clone(productById(id)||{}),context={state:L.state,companyId:L.companyId(),memberId:L.currentMember?.()?.id,role:L.currentRole?.()};
     if(!p.id){el.innerHTML=empty('请先录入产品，再制作详情页。');return;}
     p.details=p.details||[];const readonly=!L.can('edit'),inline=!!(onDone||onCancel);let dirty=false;L.isDirty=()=>dirty;
     el.innerHTML=`<div class="cat-editor-top"><button class="btn" id="cat-detail-back">← ${onCancel?'返回产品详情':'产品资料库'}</button>${inline?`<div class="cat-editor-name"><strong>${E(p.name)}</strong>${badge(p)}</div>`:`<select id="cat-detail-product" aria-label="选择产品">${L.state.products.map(x=>`<option value="${E(x.id)}" ${x.id===id?'selected':''}>${E(x.name)}</option>`).join('')}</select>`}<span class="cat-toolbar-fill"></span><button class="btn" id="cat-detail-picker" ${readonly?'disabled':''}>从素材库添加</button><button class="btn" id="cat-detail-upload" ${readonly?'disabled':''}>上传详情图</button><button class="btn" id="cat-detail-save" ${readonly?'disabled':''}>保存草稿</button>${L.can('publish')?'<button class="btn primary" id="cat-detail-publish">保存并发布</button>':''}</div><div class="notice">按展示顺序排列详情图，适合导入已有的整套商品详情页。保存草稿可继续整理；保存并发布后，客户才会看到更新。</div><div class="cat-detail-layout"><section class="panel cat-editor-panel"><div class="cat-section-head"><h3>详情页内容</h3><span class="muted" id="cat-detail-count"></span></div><div id="cat-detail-list"></div></section><aside class="cat-preview-panel"><div class="cat-preview-label"><span class="status-dot"></span>客户页面预览</div><div class="cat-phone-preview"><div class="cat-phone-brand">${E(L.company().name)}<span>产品详情</span></div><div class="cat-phone-product">${L.image(sourceImage(p),p.name)}<strong>${E(p.name)}</strong><span>${E(p.type)}</span></div><div id="cat-detail-preview"></div></div></aside></div>`;
@@ -370,16 +397,17 @@
     el.querySelector('#cat-detail-upload').onclick=()=>{if(!guard('edit'))return;sync();openUpload({productId:p.id,imagesOnly:true,usage:'detail',onDone:assets=>{assets.forEach(addAsset);draw();}});};
     function done(){dirty=false;L.isDirty=null;if(onDone)onDone(p.id);else L.go('/product?id='+encodeURIComponent(p.id));}
     el.querySelector('#cat-detail-back').onclick=()=>{if(!onCancel){L.go('/products');return;}const leave=()=>{dirty=false;L.isDirty=null;onCancel(p.id);};if(dirty)L.confirm('放弃未保存的修改','返回后，本次尚未保存的详情图修改将被放弃。',leave);else leave();};
-    el.querySelector('#cat-detail-save').onclick=async()=>{sync();if(await saveProduct(p))done();};
-    el.querySelector('#cat-detail-publish')?.addEventListener('click',()=>{sync();confirmPublish(p,done);});draw();
+    el.querySelector('#cat-detail-save').onclick=async()=>{sync();if(await saveProduct(p,'draft',context))done();};
+    el.querySelector('#cat-detail-publish')?.addEventListener('click',()=>{sync();confirmPublish(p,done,context);});draw();
   }
   function openProductBackup(){
     if(!guard('edit'))return;
+    const context=catalogContext('edit');
     const dialog=L.modal('导出产品资料备份',`<p>将当前产品草稿资料保存为一份可迁移的 JSON 文件，包含产品规格、颜色 / SKU、产品图片、条码、包装图片和详情图。</p><div class="notice">仅备份产品资料。不包含邀请、账号、素材库历史版本或导出模板配置。通过“导入 Excel”选择此 JSON 文件恢复时，资料会保存为草稿，不会直接覆盖客户发布版本。</div><div class="cat-dialog-actions"><span class="muted">${L.state.products.length} 个产品系列 · 图片将嵌入文件</span><button class="btn primary" id="cat-backup-download">下载产品资料备份</button></div>`,{wide:true});
     dialog.querySelector('#cat-backup-download').onclick=async()=>{
       if(!guard('edit'))return;const button=dialog.querySelector('#cat-backup-download');button.disabled=true;button.textContent='正在整理图片…';
       try{
-        requireStaffDownload();
+        catalogContext('edit',context);requireStaffDownload();
         const catalog={schemaVersion:1,source:{filename:L.company().name+'_产品资料备份.json',companyId:L.companyId(),originalWorkbook:L.catalog().source.filename,importedAt:now(),scope:'products-only'},products:L.state.products.map(p=>{const copy=clone(p);delete copy.liveSnapshot;delete copy.isLive;delete copy.status;return copy;})};
         const images=new Map();
         async function embed(url){
@@ -388,7 +416,7 @@
           return images.get(url);
         }
         for(const p of catalog.products){for(const v of p.variants){v.images=await Promise.all(v.images.map(embed));if(v.barcodeImage)v.barcodeImage=await embed(v.barcodeImage);}for(const item of p.packaging)if(item.image)item.image=await embed(item.image);for(const detail of p.details||[])if(detail.url)detail.url=await embed(detail.url);}
-        requireStaffDownload();L.download(new Blob([JSON.stringify(catalog)],{type:'application/json'}),L.company().name+'_产品资料备份_'+new Date().toISOString().slice(0,10)+'.json');L.closeModal();L.toast('产品资料与图片已备份，可从导入入口恢复为草稿。');
+        catalogContext('edit',context);requireStaffDownload();L.download(new Blob([JSON.stringify(catalog)],{type:'application/json'}),L.company().name+'_产品资料备份_'+new Date().toISOString().slice(0,10)+'.json');L.closeModal();L.toast('产品资料与图片已备份，可从导入入口恢复为草稿。');
       }catch(error){L.toast('备份失败：'+error.message);button.disabled=false;button.textContent='下载产品资料备份';}
     };
   }
@@ -402,20 +430,25 @@
       for(const item of p.packaging){if(!item||typeof item!=='object'||item.image&&!validImage(item.image))throw new Error('备份中的包装资料格式无效。');}
       if(p.details!==undefined&&(!Array.isArray(p.details)||p.details.some(d=>!d||typeof d!=='object'||!validImage(d.url))))throw new Error('备份中的详情页图片格式无效。');
       if(p.brand!==undefined&&p.brand!==null&&typeof p.brand!=='string')throw new Error('备份中的品牌字段格式无效。');
+      if(p.warehouse!==undefined)p.warehouse=normalizeWarehouse(p.warehouse);
       if(p.specs.some(s=>!s||typeof s!=='object')||p.tags.some(t=>typeof t!=='string')||p.issues.some(i=>!i||typeof i!=='object'))throw new Error('备份中的规格、标签或核实事项格式无效。');
     }
     return c;
   }
+  function mergeImportedProduct(imported,old,isJSON){
+    return {...imported,...(imported.brand===undefined&&typeof old?.brand==='string'?{brand:old.brand}:{}),warehouse:normalizeWarehouse(imported.warehouse===undefined?old?.warehouse:imported.warehouse),details:isJSON?(imported.details||old?.details||[]):(old?.details||[]),status:'draft',isLive:old?.isLive||false,liveSnapshot:old?.liveSnapshot,updatedAt:now()};
+  }
   function openImport(){
     if(!guard('edit'))return;
+    const context=catalogContext('edit');
     const dialog=L.modal('从 Excel 导入产品草稿',`<p>支持原产品报价表的同结构 .xlsx 文件，含产品图片；也兼容旧版产品库导出的 .json 备份。导入仅新增或更新草稿，不会删除现有产品，也不会替换已发布快照。</p><label class="cat-upload-drop"><input id="cat-import-file" type="file" accept=".xlsx,.json"><span class="cat-upload-symbol">▤</span><strong>选择产品报价表或旧版备份</strong><span>本地解析，原文件保持不变 · 最大 150 MB</span></label><div id="cat-import-preview"></div>`,{wide:true});
     dialog.querySelector('#cat-import-file').onchange=async e=>{
       const file=e.target.files[0];if(!file)return;const preview=dialog.querySelector('#cat-import-preview');preview.innerHTML='<div class="notice">正在读取表格与图片，请稍候…</div>';e.target.disabled=true;
-      try{if(file.size>150*1024*1024)throw new Error('文件超过 150 MB，请先减少表格内的超大图片。');let result;if(/\.json$/i.test(file.name)){const catalog=validateLegacyCatalog(JSON.parse(await file.text()));result={catalog,summary:{products:catalog.products.length,variants:catalog.products.reduce((n,p)=>n+p.variants.length,0)},warnings:[]};}else if(/\.xlsx$/i.test(file.name)){if(!window.ProductImporter)throw new Error('表格读取组件尚未加载，请刷新页面后重试。');result=await ProductImporter.parse(file,{...L.catalog(),products:L.state.products});}else throw new Error('请选择 .xlsx 产品报价表或旧版 .json 产品库备份。');
+      try{catalogContext('edit',context);if(file.size>150*1024*1024)throw new Error('文件超过 150 MB，请先减少表格内的超大图片。');let result;if(/\.json$/i.test(file.name)){const catalog=validateLegacyCatalog(JSON.parse(await file.text()));result={catalog,summary:{products:catalog.products.length,variants:catalog.products.reduce((n,p)=>n+p.variants.length,0)},warnings:[]};}else if(/\.xlsx$/i.test(file.name)){if(!window.ProductImporter)throw new Error('表格读取组件尚未加载，请刷新页面后重试。');result=await ProductImporter.parse(file,{...L.catalog(),products:L.state.products});}else throw new Error('请选择 .xlsx 产品报价表或旧版 .json 产品库备份。');catalogContext('edit',context);
         const added=result.summary.added??result.catalog.products.filter(p=>!L.state.products.some(old=>old.id===p.id)).length,warnings=result.warnings||[];
         preview.innerHTML=`<div class="cat-import-summary"><div><strong>${result.summary.products}</strong><span>产品系列</span></div><div><strong>${result.summary.variants}</strong><span>颜色版本</span></div><div><strong>${added}</strong><span>新增系列</span></div></div><div class="notice">导入内容将逐项存为草稿；本文件中未出现的现有产品仍保留，客户发布版不受影响。</div>${warnings.length?`<details class="cat-import-warnings"><summary>${warnings.length} 项解析提示</summary><p class="muted">以下为原表差异提示。本次采用草稿合并，未出现的现有产品不会被删除。</p>${warnings.map(w=>`<p>${E(typeof w==='string'?w:w.message||JSON.stringify(w))}</p>`).join('')}</details>`:''}<div class="cat-import-products">${result.catalog.products.map(p=>`<div>${L.image(sourceImage(p),p.name)}<strong>${E(p.name)}</strong><span>${p.variants.length} 个版本</span></div>`).join('')}</div><div class="cat-dialog-actions"><button class="btn primary" id="cat-import-confirm">确认导入为草稿</button></div>`;
-        preview.querySelector('#cat-import-confirm').onclick=async()=>{if(!guard('edit'))return;const b=preview.querySelector('#cat-import-confirm');b.disabled=true;const products=L.state.products.slice(),assets=L.state.assets.slice();for(const imported of result.catalog.products){const old=products.find(x=>x.id===imported.id);const p={...imported,...(imported.brand===undefined&&typeof old?.brand==='string'?{brand:old.brand}:{}),details:/\.json$/i.test(file.name)?(imported.details||old?.details||[]):(old?.details||[]),status:'draft',isLive:old?.isLive||false,liveSnapshot:old?.liveSnapshot,updatedAt:now()};const at=products.findIndex(x=>x.id===p.id);if(at<0)products.push(p);else products[at]=p;for(const url of referencedURLs(p)){if(!assets.some(a=>a.url===url)){assets.push({id:L.uid('asset'),name:p.name+' 导入图片 '+(assets.length+1),url,type:'image',mime:url.startsWith('data:')?url.slice(5,url.indexOf(';')):'image/webp',size:0,productIds:[p.id],skuIds:[],usage:'product',language:'通用',status:'draft',version:1,updatedAt:now(),downloadable:true});}}}
-          if(await commit({products,assets},/\.json$/i.test(file.name)?'旧版备份导入草稿':'Excel 导入草稿',file.name)){L.closeModal();L.toast('产品草稿已导入，请核实后发布。');L.render();}else b.disabled=false;};
+        preview.querySelector('#cat-import-confirm').onclick=async()=>{if(!guard('edit'))return;const b=preview.querySelector('#cat-import-confirm');if(b.disabled)return;b.disabled=true;try{catalogContext('edit',context);const products=L.state.products.slice(),assets=L.state.assets.slice();for(const imported of result.catalog.products){const old=products.find(x=>x.id===imported.id),p=mergeImportedProduct(imported,old,/\.json$/i.test(file.name));const at=products.findIndex(x=>x.id===p.id);if(at<0)products.push(p);else products[at]=p;for(const url of referencedURLs(p)){if(!assets.some(a=>a.url===url)){assets.push({id:L.uid('asset'),name:p.name+' 导入图片 '+(assets.length+1),url,type:'image',mime:url.startsWith('data:')?url.slice(5,url.indexOf(';')):'image/webp',size:0,productIds:[p.id],skuIds:[],usage:'product',language:'通用',status:'draft',version:1,updatedAt:now(),downloadable:true});}}}
+          if(await commit({products,assets},/\.json$/i.test(file.name)?'旧版备份导入草稿':'Excel 导入草稿',file.name,()=>true,context)){L.closeModal();L.toast('产品草稿已导入，请核实后发布。');L.render();}}catch(error){L.toast(error.message);}finally{b.disabled=false;}};
       }catch(error){preview.innerHTML=`<div class="notice cat-error">${E(error.message)}</div>`;}finally{e.target.disabled=false;}
     };
   }
@@ -426,6 +459,7 @@
   L.openAssetUpload=openUpload;
   L.openAssetEditor=id=>{if(guard('upload'))openAsset(id);};
   L.renderProductEditor=renderEditor;
+  L.warehouseTools=Object.freeze({normalize:normalizeWarehouse});
   L.renderDetailEditor=renderDetailEditor;
   L.register('products',{title:'产品资料库',subtitle:'浏览产品、查看规格与相关资料。',banner:true,render:(el,params)=>L.renderCollection(el,params)});
   L.register('editor',{title:'产品资料',subtitle:'将产品事实整理为可复用的资料',render:renderEditor});

@@ -1,5 +1,5 @@
 .product-print-dialog.library-dialog.wide{width:min(980px,calc(100vw - 32px))}
-.product-print-toolbar{display:grid;grid-template-columns:1fr 1fr auto;align-items:end;gap:16px}
+.product-print-toolbar{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(115px,.55fr) auto;align-items:end;gap:16px}
 .product-print-toolbar .field{min-width:0}
 .product-print-toolbar select{width:100%}
 .product-print-options{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-top:8px}
