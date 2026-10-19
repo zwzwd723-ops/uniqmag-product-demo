@@ -77,6 +77,38 @@
 .invite-link-code{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .invite-link-code code{font-size:13px;overflow-wrap:anywhere}
 .invite-link-result>p{margin:0}
+.invite-quote-toggle{margin:0;align-items:flex-start}
+.invite-quote-editor{display:grid;gap:18px;margin-top:20px;padding-top:20px;border-top:1px solid var(--line);min-width:0}
+.invite-quote-editor[hidden]{display:none}
+.invite-quote-editor>.form-grid,.invite-quote-editor>p{margin:0}
+.invite-quote-editor .field{min-width:0}
+.invite-quote-editor input,.invite-quote-editor select,.invite-quote-editor textarea{width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+.invite-quote-import{display:flex;gap:10px;align-items:flex-end;min-width:0}
+.invite-quote-import .field{flex:1;margin:0}
+.invite-quote-import .btn{flex-shrink:0;min-height:42px}
+.invite-quote-rows{display:grid;gap:0;min-width:0;border-top:1px solid var(--line)}
+.invite-quote-row{display:grid;grid-template-columns:minmax(0,1fr) 100px 120px 110px;gap:14px;align-items:center;padding:16px 0;border-bottom:1px solid var(--line);min-width:0}
+.invite-quote-row .field{margin:0;gap:6px}
+.invite-quote-row .field>span,.invite-quote-line-total>span{font-size:11px;color:var(--muted)}
+.invite-quote-row .field input{padding:9px 10px;font-variant-numeric:tabular-nums;min-height:40px;font-size:13px}
+.invite-quote-row .field input:disabled{opacity:.5}
+.invite-quote-row .invite-quote-product{align-items:flex-start;margin:0;min-width:0}
+.invite-quote-line-total{display:flex;flex-direction:column;gap:10px;min-width:0;text-align:right;align-self:center}
+.invite-quote-line-total strong{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.invite-quote-row-invalid{background:var(--bg);padding-left:10px;padding-right:10px}
+.invite-quote-invalid-note{font-weight:600!important;color:var(--text)!important}
+.invite-quote-total{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;border:1px solid var(--line);border-radius:9px;background:var(--bg);min-width:0}
+.invite-quote-total>div{min-width:0;font-size:13px}
+.invite-quote-total small{display:block;color:var(--muted);font-size:12px;line-height:1.5;margin-top:5px}
+.invite-quote-total>strong{font-size:23px;font-weight:600;line-height:1.4;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;text-align:right;min-width:0}
+.invite-detail-quotation{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:17px 0;border-bottom:1px solid var(--line);font-size:13px}
+.invite-detail-quotation h3,.invite-detail-quotation small{flex-basis:100%;margin:0}
+.invite-detail-quotation strong{font-size:20px;font-weight:600;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.invite-local-link{padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);min-width:0}
+.invite-local-link summary{font-size:13px;cursor:pointer;color:var(--muted)}
+.invite-local-link textarea{font-size:12px;min-width:0;width:100%;font-family:Consolas,monospace;overflow-wrap:anywhere;box-sizing:border-box}
+.invite-local-link .invite-link-code{margin-top:15px}
+@media(max-width:760px){.invite-quote-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:13px 16px}.invite-quote-product{grid-column:1/-1}.invite-quote-row .field input{font-size:16px;min-height:44px}.invite-quote-line-total{grid-column:1/-1;flex-direction:row;justify-content:space-between;align-items:center;gap:10px}.invite-quote-total{padding:14px;align-items:flex-start;flex-direction:column;gap:8px}.invite-quote-total>strong{align-self:flex-end;max-width:100%;font-size:22px}.invite-quote-import{align-items:stretch;flex-direction:column}.invite-quote-import .btn{align-self:flex-end}.invite-quote-editor{gap:16px}.invite-quote-editor .form-grid{grid-template-columns:1fr}.invite-detail-quotation strong{font-size:18px}}
 @media(max-width:480px){.invite-link-summary{grid-template-columns:1fr;gap:14px}.invite-link-heading h2{font-size:18px}.invite-link-result{gap:14px}}
 .invite-detail-grants{padding:8px 0 14px}
 .invite-detail-grants h3{font-size:14px;margin:20px 0 12px}

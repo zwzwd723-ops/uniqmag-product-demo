@@ -366,9 +366,10 @@
     return nav;
   }
   const routePermission={editor:'edit','detail-editor':'edit',assets:'upload',downloads:'internal-download',invites:'invites',quotations:'quote',templates:'templates',exports:'export',team:'team',activity:'activity'};
-  let renderedHash=null;
+  let renderedHash=null,publicOnlyStart=false;
+  const publicQuoteRoute=()=>location.hash.replace(/^#\/?/,'').split('?')[0]==='quote';
   L.render=async()=>{
-    if(!L.ready)return;
+    if(!L.ready&&!publicQuoteRoute()){if(publicOnlyStart)location.reload();return;}
     const normalizedHash=L.routeURL(location.hash||'products');if(location.hash!==normalizedHash)history.replaceState(null,'',normalizedHash);
     if(renderedHash!==null&&location.hash!==renderedHash&&L.isDirty?.()){
       const requested=location.hash,d=L.modal('资料尚未保存','<p>离开后，本次未保存的编辑将丢失。已保存的资料不受影响。</p><div class="modal-actions"><button class="btn" data-stay>继续编辑</button><button class="btn danger" data-leave>放弃修改并离开</button></div>');let accepted=false;
@@ -376,6 +377,15 @@
     }
     let raw=location.hash.replace(/^#\/?/,'')||'products';if(raw.split('?')[0]==='overview'){raw=raw.replace(/^overview/,'products');history.replaceState(null,'',L.routeURL(raw));}
     const [route,qs='']=raw.split('?'),params=new URLSearchParams(qs),staff=L.isStaff(),isEntry=['access','login','workspaces'].includes(route);
+    if(route==='quote'){
+      renderedHash=location.hash;L.isDirty=null;L.closeModal();L.route=route;
+      const app=document.getElementById('app');app.classList.remove('login-page');app.classList.add('public-quote-page');
+      app.innerHTML='<main id="main" tabindex="-1" class="public-quote-main"></main>';
+      const target=document.getElementById('main');
+      if(L.quoteShare)L.quoteShare.render(target,params);else target.innerHTML='<section class="panel empty-state"><h1>报价暂未加载</h1><p>请刷新页面，或联系业务人员获取新链接。</p></section>';
+      return;
+    }
+    document.getElementById('app').classList.remove('public-quote-page');
     const linkedCompany=params.get('company');
     if(!isEntry&&hasOwn(companies,linkedCompany)&&linkedCompany!==activeCompanyId){
       if(!staff){history.replaceState(null,'',L.routeURL('login'));return L.render();}
@@ -407,6 +417,8 @@
     document.getElementById('retry-startup').onclick=()=>location.reload();
   }
   document.addEventListener('DOMContentLoaded',async()=>{
+    // Shared quote snapshots do not log in, open the workspace database or mutate any identity.
+    if(publicQuoteRoute()){publicOnlyStart=true;await L.render();return;}
     // Verify session persistence before reading identities; unavailable storage must never imply a login.
     try{sessionStorage.setItem(companySession,activeCompanyId);if(sessionStorage.getItem(companySession)!==activeCompanyId)throw new Error();sessionStorage.removeItem(roleSession);}
     catch{startupFailure(new Error('浏览器已阻止会话存储，无法维持登录。请允许本网站使用存储，或使用普通浏览窗口后重试。'));return;}
