@@ -43,7 +43,7 @@
   L.currentRole=()=>L.currentMember()?.role||'customer';
   L.roleName=role=>({admin:'管理员',business:'业务人员',customer:'客户'}[L.normalizeRole(role)]);
   L.isStaff=()=>['admin','business'].includes(L.currentRole());
-  L.can=action=>L.currentRole()==='admin'||(L.currentRole()==='business'&&['edit','upload','publish','invites','export','internal-download'].includes(action))||(action==='export'&&L.hasInvitePermission?.(L.currentInvite(),'export')===true);
+  L.can=action=>L.currentRole()==='admin'||(L.currentRole()==='business'&&['edit','upload','publish','invites','export','internal-download','quote'].includes(action))||(action==='export'&&L.hasInvitePermission?.(L.currentInvite(),'export')===true);
   L.log=(action,target)=>{const member=L.currentMember();L.state.logs.unshift({id:L.uid('log'),action,target,time:new Date().toISOString(),actor:member?member.name+' · '+L.roleName(member.role):'客户（演示）'});};
   L.switchRole=async()=>{throw new Error('员工身份由管理员分配，请使用员工账号登录。');};
   async function discardUnsaved(title){
@@ -192,7 +192,7 @@
       return a.status==='published'&&matchesProduct&&(!(a.skuIds||[]).length||!sku||a.skuIds.includes(sku));
     });
   };
-  let db,templateBaseline=[],pendingSave=null,saveQueue=Promise.resolve();
+  let db,templateBaseline=[],quotationBaseline=[],pendingSave=null,saveQueue=Promise.resolve();
   const storageTimeout=15000;
   const database=(id=activeCompanyId)=>new Promise((resolve,reject)=>{
     let settled=false;const q=indexedDB.open(companies[id].database,1);
@@ -223,47 +223,51 @@
     if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;
     const keys=Object.keys(a);return keys.length===Object.keys(b).length&&keys.every(k=>Object.prototype.hasOwnProperty.call(b,k)&&sameTemplate(a[k],b[k]));
   };
-  const templateMap=items=>{
-    if(!Array.isArray(items))throw new Error('模板记录格式不正确，请重新打开页面后重试。');
-    const map=new Map();for(const item of items){if(!item?.id||map.has(item.id))throw new Error('模板标识重复或为空，请重新打开页面后重试。');map.set(item.id,item);}return map;
+  const recordMap=(items,label)=>{
+    if(!Array.isArray(items))throw new Error(`${label}记录格式不正确，请重新打开页面后重试。`);
+    const map=new Map();for(const item of items){if(!item?.id||map.has(item.id))throw new Error(`${label}标识重复或为空，请重新打开页面后重试。`);map.set(item.id,item);}return map;
   };
-  function mergeTemplates(base,local,remote){
-    const before=templateMap(base),ours=templateMap(local),theirs=templateMap(remote),merged=[];
+  function mergeRecords(base,local,remote,label){
+    const before=recordMap(base,label),ours=recordMap(local,label),theirs=recordMap(remote,label),merged=[];
     for(const id of new Set([...ours.keys(),...theirs.keys(),...before.keys()])){
       const b=before.get(id),l=ours.get(id),r=theirs.get(id);
-      if(!sameTemplate(l,b)&&!sameTemplate(r,b)&&!sameTemplate(l,r))throw new Error(`模板“${l?.name||r?.name||b?.name||id}”已在其他标签页修改，本次保存未覆盖任何资料。请先保留当前编辑，再刷新页面核对。`);
+      if(!sameTemplate(l,b)&&!sameTemplate(r,b)&&!sameTemplate(l,r))throw new Error(`${label}“${l?.number||l?.name||r?.number||r?.name||b?.number||b?.name||id}”已在其他标签页修改，本次保存未覆盖任何资料。请先保留当前编辑，再刷新页面核对。`);
       const value=sameTemplate(l,b)?r:l;if(value)merged.push(structuredClone(value));
     }
     return merged;
   }
-  function acceptSavedTemplates(captured,saved){
-    const before=templateMap(captured),current=templateMap(L.state.templates),stored=templateMap(saved),next=[],baseline=[];
+  const mergeTemplates=(base,local,remote)=>mergeRecords(base,local,remote,'模板');
+  const mergeQuotations=(base,local,remote)=>mergeRecords(base,local,remote,'报价单');
+  function acceptSavedRecords(key,captured,saved,label){
+    const before=recordMap(captured,label),current=recordMap(L.state[key]??[],label),stored=recordMap(saved,label),next=[],baseline=[];
     for(const id of new Set([...current.keys(),...stored.keys(),...before.keys()])){
       const b=before.get(id),l=current.get(id),r=stored.get(id),unchanged=sameTemplate(l,b);
       const value=unchanged?r:l;if(value)next.push(structuredClone(value));
       // An edit made while saving must still detect an unseen remote change on its next save.
       const reference=!unchanged&&!sameTemplate(r,b)&&!sameTemplate(r,l)?b:r;if(reference)baseline.push(structuredClone(reference));
     }
-    L.state.templates=next;templateBaseline=baseline;
+    L.state[key]=next;return baseline;
   }
   L.save=async()=>{
     if(!db)throw new Error('浏览器保存不可用，请允许网站使用存储后重试。');
     L.state.logs=L.state.logs.slice(0,300);
-    const job={snapshot:structuredClone(L.state),baseline:templateBaseline,previous:pendingSave,database:db,state:L.state};pendingSave=job;
+    const job={snapshot:structuredClone(L.state),baseline:templateBaseline,quotationBaseline,previous:pendingSave,database:db,state:L.state};pendingSave=job;
     const run=saveQueue.then(()=>{
       // Rebase queued snapshots against their own predecessor, not a newer global baseline.
       let ancestor=job.previous;while(ancestor&&!ancestor.saved)ancestor=ancestor.previous;
       const base=ancestor?ancestor.saved:job.baseline;
       const local=ancestor?mergeTemplates(ancestor.snapshot.templates,job.snapshot.templates,ancestor.saved):job.snapshot.templates;
+      const quotationBase=ancestor?ancestor.savedQuotations:job.quotationBaseline;
+      const quotations=ancestor?mergeQuotations(ancestor.snapshot.quotations??[],job.snapshot.quotations??[],ancestor.savedQuotations):job.snapshot.quotations??[];
       return new Promise((resolve,reject)=>{
-        const tx=job.database.transaction('state','readwrite'),store=tx.objectStore('state');let failure,merged,settled=false;
+        const tx=job.database.transaction('state','readwrite'),store=tx.objectStore('state');let failure,merged,mergedQuotations,settled=false;
         const timeout=setTimeout(()=>{if(settled)return;settled=true;failure=new Error('保存本机资料超时，请关闭其他产品库标签页后重试。');try{tx.abort();}catch{}reject(failure);},storageTimeout*2);
-        tx.oncomplete=()=>{if(settled)return;settled=true;clearTimeout(timeout);job.saved=merged;if(L.state===job.state&&db===job.database){try{acceptSavedTemplates(job.snapshot.templates,merged);}catch(error){L.toast(error.message);}}resolve();};
+        tx.oncomplete=()=>{if(settled)return;settled=true;clearTimeout(timeout);job.saved=merged;job.savedQuotations=mergedQuotations;if(L.state===job.state&&db===job.database){try{templateBaseline=acceptSavedRecords('templates',job.snapshot.templates,merged,'模板');}catch(error){L.toast(error.message);}try{quotationBaseline=acceptSavedRecords('quotations',job.snapshot.quotations??[],mergedQuotations,'报价单');}catch(error){L.toast(error.message);}}resolve();};
         tx.onerror=()=>{failure=failure||new Error('本机保存失败，可能空间不足，请减少大文件后重试。');};
         tx.onabort=()=>{if(settled)return;settled=true;clearTimeout(timeout);reject(failure||new Error('保存未完成，请重试。'));};
         // Read and merge within the same write transaction so another tab cannot race this put.
         const read=store.get('workspace');read.onsuccess=()=>{
-          if(settled)return;try{merged=mergeTemplates(base,local,read.result?.templates||[]);store.put({...job.snapshot,templates:merged},'workspace');}
+          if(settled)return;try{merged=mergeTemplates(base,local,read.result?.templates||[]);mergedQuotations=mergeQuotations(quotationBase,quotations,read.result?.quotations??[]);store.put({...job.snapshot,templates:merged,quotations:mergedQuotations},'workspace');}
           catch(error){failure=error;tx.abort();}
         };
       });
@@ -353,7 +357,7 @@
     };
     let nav=`<p class="nav-caption">资料浏览</p>${link('products','grid','产品资料库')}`;
     if(staff){
-      nav+=`<p class="nav-caption nav-group-caption">内容与客户</p>${link('assets','image','素材中心',{permission:'upload'})}${link('invites','link','客户与邀请',{permission:'invites'})}`;
+      nav+=`<p class="nav-caption nav-group-caption">内容与客户</p>${link('assets','image','素材中心',{permission:'upload'})}${link('invites','link','客户与邀请',{permission:'invites'})}${link('quotations','template','报价单',{permission:'quote'})}`;
       nav+=`<p class="nav-caption nav-group-caption">下载与导出</p>${link('downloads','download','资料下载',{permission:'export'})}${link('exports','template','导出表格',{tab:'new',permission:'export',selection:true})}${link('exports','clock','导出记录',{tab:'history',permission:'export'})}${link('templates','settings','导出模板',{permission:'templates'})}`;
       if(L.can('team')||L.can('activity'))nav+=`<p class="nav-caption nav-group-caption">系统管理</p>${link('team','users','账号与角色',{permission:'team'})}${link('activity','list','操作记录',{permission:'activity'})}`;
       nav+=`<a class="nav-link nav-preview-link" href="#/access?company=${L.companyId()}&code=${encodeURIComponent(L.state.invites.find(i=>i.id==='invite-demo')?.code||'')}">${L.icon('eye')}<span>客户预览</span></a>`;
@@ -361,7 +365,7 @@
     else if(L.can('export'))nav+=`<p class="nav-caption nav-group-caption">下载与导出</p>${link('exports','template','导出表格',{tab:'new',permission:'export',selection:true})}`;
     return nav;
   }
-  const routePermission={editor:'edit','detail-editor':'edit',assets:'upload',downloads:'internal-download',invites:'invites',templates:'templates',exports:'export',team:'team',activity:'activity'};
+  const routePermission={editor:'edit','detail-editor':'edit',assets:'upload',downloads:'internal-download',invites:'invites',quotations:'quote',templates:'templates',exports:'export',team:'team',activity:'activity'};
   let renderedHash=null;
   L.render=async()=>{
     if(!L.ready)return;
@@ -387,7 +391,7 @@
     const role=L.currentRole(),label=L.roleName(role),member=L.currentMember(),accountName=member?.name||label,invite=staff?null:L.currentInvite();
     document.getElementById('app').innerHTML=`<div class="demo-banner">${L.icon('info')}<span><strong>前端演示版</strong> · 修改仅保存在本浏览器，账号与邀请尚未连接服务器。</span><button id="demo-info">了解保存范围</button></div>${!isEntry?`<aside class="sidebar ${staff?'staff-sidebar':'customer-sidebar'}"><div class="sidebar-brand-row">${companyBrand(staff)}<button class="btn small sidebar-toggle" id="sidebar-toggle" aria-expanded="false" aria-controls="workspace-navigation">${L.icon('menu')}导航</button></div>${window.LibraryPreferences.controls()}<div class="sidebar-navigation" id="workspace-navigation"><nav aria-label="主要导航">${sidebarNavigation(route,params,staff,catalogRoute)}</nav></div><div class="sidebar-foot"><span class="status-dot"></span><div>${label}<small>${staff?'编辑资料、下载与导出':'按邀请范围查看资料'}</small></div></div></aside>`:''}<div class="workspace ${isEntry?'entry-workspace':''}"><header class="topbar"><div class="breadcrumb">${L.esc(isEntry?'UNIQMAG / UNICO':L.company().name)} <span>/</span> ${L.esc(meta?.title||'产品资料库')}</div><div class="top-actions">${isEntry?'<a class="btn small" href="#/login">登录</a>':`<button class="profile-button" id="role-button" aria-label="当前账号：${L.esc(accountName)}，${label}，返回登录"><span class="avatar">${L.esc(member?String(accountName).slice(0,1):'客')}</span><span>${L.esc(accountName)}${member?' · '+label:''}</span>${L.icon('chevron')}</button><button class="btn small" id="leave-account">退出</button>`}</div></header><main id="main" tabindex="-1">${!isEntry&&meta&&!meta.banner&&!denied?L.pageBanner({eyebrow:meta.eyebrow||L.company().name+' PRODUCT LIBRARY',title:meta.title,description:meta.subtitle||''}):''}<div id="route-view"></div></main><footer class="site-footer"><span>${L.esc(isEntry?'UNIQMAG / UNICO':L.company().name)} · 产品资料，井然有序</span><span>产品资料库 · 前端演示</span></footer></div>`;
     window.LibraryPreferences.attachBanner();bindCompanySwitcher();L.decorateCompanyLinks(document.getElementById('app'));
-    document.getElementById('demo-info').onclick=()=>L.modal('当前版本的保存与权限','<div class="stack"><p>产品、上传文件、邀请和模板配置保存在当前浏览器，换设备不会同步。</p><p>管理员、业务人员和客户共用产品界面，按身份展示操作入口。客户按邀请范围浏览资料，素材下载和表格导出由邀请分别授权。当前角色和邀请仍为流程演示，正式身份认证、跨设备客户授权与文件保护需要后端接入。</p><p>固定模板可以生成真实 Excel；云端保存与公司模板保真套版由后端接入。</p></div>');
+    document.getElementById('demo-info').onclick=()=>L.modal('当前版本的保存与权限','<div class="stack"><p>产品、上传文件、邀请和模板配置保存在当前浏览器，换设备不会同步。</p><p>管理员、业务人员和客户共用产品界面，按身份展示操作入口。客户按邀请范围浏览资料，素材下载和表格导出由邀请分别授权。当前角色和邀请仍为流程演示，正式身份认证、跨设备客户授权与文件保护需要后端接入。</p><p>固定模板可以生成 Excel 和 PDF；业务人员可填写报价并下载 PDF。云端保存与公司模板保真套版仍需后端接入。</p></div>');
     document.getElementById('role-button')?.addEventListener('click',()=>L.go('login'+(staff?'?mode=employee':'')));
     document.getElementById('leave-account')?.addEventListener('click',async()=>{try{if(await L.logout())L.go('login');}catch(error){L.toast(error.message);}});
     document.getElementById('sidebar-toggle')?.addEventListener('click',event=>{const button=event.currentTarget,expanded=button.getAttribute('aria-expanded')!=='true';button.setAttribute('aria-expanded',String(expanded));document.querySelector('.sidebar')?.classList.toggle('nav-expanded',expanded);});
@@ -406,7 +410,7 @@
     // Verify session persistence before reading identities; unavailable storage must never imply a login.
     try{sessionStorage.setItem(companySession,activeCompanyId);if(sessionStorage.getItem(companySession)!==activeCompanyId)throw new Error();sessionStorage.removeItem(roleSession);}
     catch{startupFailure(new Error('浏览器已阻止会话存储，无法维持登录。请允许本网站使用存储，或使用普通浏览窗口后重试。'));return;}
-    try{db=await database();const saved=await readWorkspace(db);if(saved&&saved.schemaVersion!==1)throw new Error('本机资料版本暂不兼容，请联系维护人员。');L.state=saved||seed();templateBaseline=structuredClone(saved?.templates||[]);if(migrateRoles(L.state)||!saved)await L.save();}
+    try{db=await database();const saved=await readWorkspace(db);if(saved&&saved.schemaVersion!==1)throw new Error('本机资料版本暂不兼容，请联系维护人员。');L.state=saved||seed();templateBaseline=structuredClone(saved?.templates||[]);quotationBaseline=structuredClone(saved?.quotations??[]);if(migrateRoles(L.state)||!saved)await L.save();}
     catch(error){startupFailure(error);return;}
     try{
       sessionStorage.removeItem(roleSession);sessionStorage.setItem(companySession,activeCompanyId);
