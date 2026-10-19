@@ -103,6 +103,16 @@
 .collection-photo,.product-gallery{isolation:isolate}
 .collection-photo>img,.product-gallery>img{mix-blend-mode:multiply}
 
+/* Keep both detail columns level, with the image strip anchored below the main image. */
+.product-description{min-width:0}
+.product-description>.customer-product-price-detail:last-child{margin-bottom:0}
+@media(min-width:901px){
+  .product-hero{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr)}
+  .product-gallery{display:flex;flex-direction:column;align-self:stretch}
+  .product-gallery>img,.product-gallery>.image-placeholder{flex:1 1 auto;min-height:285px}
+  .product-thumbs,.product-edit-images{flex-shrink:0}
+}
+
 /* Keep the notice and fixed sidebar joined while the document scrolls. */
 :root{--notice-height:36px}
 .demo-banner{position:sticky;top:0;z-index:35;height:auto;min-height:36px;flex-shrink:0}
