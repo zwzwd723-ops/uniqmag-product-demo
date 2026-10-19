@@ -18,12 +18,12 @@
   }
   function customerPriceContent(price,detail){
     if(price.status==='none')return '';
-    const footer=detail&&['quoted','unquoted'].includes(price.status)?`<div class="customer-product-price-meta"><span>报价编号 ${E(price.number)}</span><span>有效期至 ${E(price.validUntil)}</span></div><button class="btn small" type="button" data-view-customer-quote>查看完整报价 ${L.icon('arrow')}</button>`:'';
+    const footer=detail&&['quoted','unquoted'].includes(price.status)?`<div class="customer-product-price-meta"><div><span>报价编号</span><b data-no-translate>${E(price.number)}</b></div><div><span>有效期至</span><b data-no-translate>${E(price.validUntil)}</b></div></div><button class="btn small" type="button" data-view-customer-quote>查看完整报价 ${L.icon('arrow')}</button>`:'';
     if(price.status!=='quoted'){
       const label=price.status==='unquoted'?'该配色暂未报价':price.status==='expired'?'报价已过有效期':'报价暂不可用';
       return `<div class="customer-product-price-empty"><strong>${label}</strong>${detail?'<span>请联系业务人员确认当前配色的报价。</span>':''}</div>${footer}`;
     }
-    return `<div class="customer-product-price-heading"><span>您的专属报价</span><strong><small>${E(price.currency)}</small> ${E(price.unitPrice)}<small> / 件</small></strong></div><div class="customer-product-price-values"><span>报价数量 <b>${E(price.quantity)}</b></span><span>金额 <b>${E(price.currency)} ${E(price.amount)}</b></span></div>${footer}`;
+    return `<div class="customer-product-price-heading"><span>报价信息</span><small><span>币种</span><b data-no-translate>${E(price.currency)}</b></small></div><dl class="customer-product-price-terms"><div><dt>单价</dt><dd data-no-translate>${E(price.unitPrice)}</dd></div><div><dt>报价数量</dt><dd data-no-translate>${E(price.quantity)}</dd></div><div><dt>小计</dt><dd data-no-translate>${E(price.amount)}</dd></div></dl>${footer}`;
   }
   function customerPriceHTML(invite,productId,skuId,detail=false){
     const price=customerPrice(invite,productId,skuId);
