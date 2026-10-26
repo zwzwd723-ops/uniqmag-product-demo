@@ -7,10 +7,39 @@
   const now = () => new Date().toISOString();
   function normalizeWarehouse(value){
     if(value==null)value={};
-    if(typeof value!=='object'||Array.isArray(value))throw new Error('仓库字段格式不正确。');
-    const location=value.location??'';
-    if(typeof location!=='string'||[...location].length>120||/[\u0000-\u001f\u007f]/.test(location))throw new Error('仓库须为不超过 120 个字符的单行文字。');
-    return {...value,location:location.trim()};
+    if(typeof value!=='object'||Array.isArray(value))throw new Error('仓储信息格式不正确。');
+    let source=value.entries;
+    if(source===undefined){
+      const location=value.location??'';
+      if(typeof location!=='string'||[...location].length>120||/[\u0000-\u001f\u007f]/.test(location))throw new Error('仓库名称须为不超过 120 个字符的单行文字。');
+      source=location.trim()?[{location,quantity:null}]:[];
+    }
+    if(!Array.isArray(source)||source.length>100)throw new Error('仓储信息最多支持 100 个仓库。');
+    const entries=[];let totalQuantity=0;
+    for(const row of source){
+      if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('仓储行格式不正确。');
+      const name=row.location??'';
+      if(typeof name!=='string'||[...name].length>120||/[\u0000-\u001f\u007f]/.test(name))throw new Error('仓库名称须为不超过 120 个字符的单行文字。');
+      const location=name.trim(),raw=row.quantity;let quantity=null;
+      if(raw!==undefined&&raw!==null&&!(typeof raw==='string'&&!raw.trim())){
+        if(typeof raw!=='number'&&!(typeof raw==='string'&&/^\d+$/.test(raw.trim())))throw new Error('数量须为 0 或正整数。');
+        quantity=Number(typeof raw==='string'?raw.trim():raw);
+        if(!Number.isSafeInteger(quantity)||quantity<0)throw new Error('数量须为安全范围内的非负整数。');
+      }
+      if(!location&&quantity===null)continue;
+      if(!location)throw new Error('请为已填写的数量补充仓库名称。');
+      if(quantity!==null){totalQuantity+=quantity;if(!Number.isSafeInteger(totalQuantity))throw new Error('总数量过大，请核对各仓库数量。');}
+      entries.push({...row,location,quantity});
+    }
+    return {...value,location:entries[0]?.location||'',entries,totalQuantity};
+  }
+  function warehouseSummaryHTML(warehouse){
+    const missing=warehouse.entries.some(row=>row.quantity===null);
+    const known=warehouse.entries.some(row=>row.quantity!==null);
+    return `<span>${missing?'已填写合计':'总数量'}</span><strong data-warehouse-total data-no-translate>${missing&&!known?'—':warehouse.totalQuantity.toLocaleString('en-US')}</strong>${missing?'<small>部分仓库数量未填写，仅统计已填数量。</small>':''}`;
+  }
+  function warehouseEditorHTML(warehouse){
+    return `<section class="warehouse-editor" id="cat-warehouse-editor" aria-labelledby="warehouse-editor-title"><div class="cat-section-head"><h3 id="warehouse-editor-title">仓储信息</h3><button class="btn small" type="button" id="cat-add-warehouse">＋ 添加仓库</button></div><div class="warehouse-editor-rows">${warehouse.entries.map((row,i)=>`<div class="warehouse-editor-row" data-warehouse-row="${i}"><label class="field"><span>仓库</span><input name="warehouseLocation" maxlength="120" value="${E(row.location)}" placeholder="例如：美国新泽西"></label><label class="field"><span>数量</span><input name="warehouseQuantity" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="16" value="${E(row.quantity??'')}" placeholder="未填写"></label><button class="icon-btn" type="button" data-remove-warehouse="${i}" aria-label="移除仓库">×</button></div>`).join('')||'<p class="muted warehouse-empty">暂无仓库，点击“添加仓库”录入。</p>'}</div><div class="warehouse-summary" data-warehouse-summary role="status" aria-live="polite"></div><p class="warehouse-form-error" data-warehouse-error role="alert" hidden></p></section>`;
   }
   function catalogContext(permission,expected){
     if(!L.isStaff()||!L.can(permission))throw new Error('当前角色无此操作权限。');
@@ -180,6 +209,7 @@
     const id=params.get('id'),original=id?productById(id):null;
     if(id&&!original){el.innerHTML=empty('该产品不存在。');return;}
     const p=clone(original||newProduct()),context={state:L.state,companyId:L.companyId(),memberId:L.currentMember?.()?.id,role:L.currentRole?.()};let tab=['basic','specs','variants','packaging'].includes(params.get('tab'))?params.get('tab'):'basic',dirty=false,busy=false;const readonly=!L.can('edit');L.isDirty=()=>dirty;
+    p.warehouse=normalizeWarehouse(p.warehouse);if(!p.warehouse.entries.length)p.warehouse.entries.push({location:'',quantity:null});
     el.innerHTML=`<div class="cat-editor-top"><button class="btn" id="cat-back">← ${onCancel?'返回产品详情':'产品资料库'}</button><div class="cat-editor-name"><strong>${E(p.name||'新增产品')}</strong>${badge(p)}</div><button class="btn" id="cat-save" ${readonly?'disabled':''}>保存草稿</button>${L.can('publish')?'<button class="btn primary" id="cat-editor-publish">保存并发布</button>':''}</div><div class="notice">${p.isLive?'当前编辑内容将另存为草稿；客户继续看到原发布版本。':'新产品先保存在当前浏览器，发布后可在客户预览中查看。'}${readonly?' 当前角色只能查看资料。':''}</div><div class="tabs cat-editor-tabs">${[['basic','基本资料'],['specs','产品规格'],['variants','颜色 / SKU'],['packaging','包装资料']].map(([k,v])=>`<button data-tab="${k}" ${k===tab?'class="active"':''}>${v}</button>`).join('')}</div><div id="cat-editor-body"></div>`;
     const body=el.querySelector('#cat-editor-body');body.addEventListener('input',()=>{if(!readonly)dirty=true;});
     function sync(){
@@ -187,14 +217,26 @@
       if(tab==='specs')body.querySelectorAll('[data-spec]').forEach(row=>{const s=p.specs[Number(row.dataset.spec)];s.label=row.querySelector('[name=label]').value.trim();s.key=row.querySelector('[name=key]').value.trim();s.value=row.querySelector('[name=value]').value;s.pending=row.querySelector('[name=pending]').checked;});
       if(tab==='variants')body.querySelectorAll('[data-variant]').forEach(row=>{const v=p.variants[Number(row.dataset.variant)];v.sku=row.querySelector('[name=sku]').value.trim()||null;v.color=row.querySelector('[name=color]').value.trim()||null;v.colorLabel=row.querySelector('[name=colorLabel]').value.trim();v.swatch=row.querySelector('[name=swatch]').value;});
       if(tab==='packaging')body.querySelectorAll('[data-pack]').forEach(row=>{const v=p.packaging[Number(row.dataset.pack)];v.title=row.querySelector('[name=title]').value.trim();v.text=row.querySelector('[name=text]').value;v.appliesTo=row.querySelector('[name=appliesTo]').value.trim()||null;v.pending=row.querySelector('[name=pending]').checked;});
-      if(tab==='basic')p.warehouse={...p.warehouse,location:body.querySelector('[name=warehouseLocation]').value};
+      if(tab==='basic')p.warehouse=readWarehouseForm();
+    }
+    function readWarehouseForm(){
+      return {...p.warehouse,entries:[...body.querySelectorAll('[data-warehouse-row]')].map(row=>({location:row.querySelector('[name=warehouseLocation]').value,quantity:row.querySelector('[name=warehouseQuantity]').value}))};
+    }
+    function refreshWarehouseTotal(){
+      const summary=body.querySelector('[data-warehouse-summary]'),error=body.querySelector('[data-warehouse-error]');if(!summary)return;
+      try{summary.innerHTML=warehouseSummaryHTML(normalizeWarehouse(readWarehouseForm()));error.textContent='';error.hidden=true;}
+      catch(issue){summary.innerHTML='<span>总数量</span><strong data-warehouse-total>—</strong>';error.textContent=issue.message;error.hidden=false;}
     }
     function draw(){
       el.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-      if(tab==='basic')body.innerHTML=`<div class="cat-edit-layout"><section class="panel cat-editor-panel"><h3>基本资料</h3><div class="form-grid">${field('产品名称 *','name',p.name)}${brandField(p)}<label class="field"><span>产品类型分类</span><select name="category">${L.getCategories().map(c=>`<option value="${E(c.id)}" ${L.categoryKey(p)===c.id?'selected':''}>${E(c.name)}</option>`).join('')}</select></label>${field('具体类型','type',p.type)}<label class="field"><span>仓库</span><input name="warehouseLocation" maxlength="120" value="${E(p.warehouse?.location||'')}" placeholder="未填写"></label>${field('标签（逗号分隔）','tags',(p.tags||[]).join('，'))}<label class="field full"><span>产品简介</span><textarea name="description" rows="4" placeholder="简要描述产品特点，客户将在产品卡片与详情页看到">${E(p.description)}</textarea></label></div></section><aside class="panel cat-editor-aside"><div class="cat-edit-cover">${L.image(sourceImage(p),p.name||'产品主图')}</div><h3>产品资料检查</h3><div class="cat-check-item"><span>颜色 / SKU</span><strong>${p.variants.length}</strong></div><div class="cat-check-item"><span>规格字段</span><strong>${p.specs.length}</strong></div><div class="cat-check-item"><span>包装资料</span><strong>${p.packaging.length}</strong></div><p class="muted">在“颜色 / SKU”中设置产品图片。未提供的资料可保持空白。</p></aside></div>${(p.issues||[]).length?`<section class="panel cat-editor-panel cat-source-issues"><h3>原表待核实事项</h3>${p.issues.map(i=>`<div><span class="badge amber">待核实</span><strong>${E(i.field)}</strong><p>${E(i.message)}</p></div>`).join('')}</section>`:''}`;
+      if(tab==='basic')body.innerHTML=`<div class="cat-edit-layout"><section class="panel cat-editor-panel"><h3>基本资料</h3><div class="form-grid">${field('产品名称 *','name',p.name)}${brandField(p)}<label class="field"><span>产品类型分类</span><select name="category">${L.getCategories().map(c=>`<option value="${E(c.id)}" ${L.categoryKey(p)===c.id?'selected':''}>${E(c.name)}</option>`).join('')}</select></label>${field('具体类型','type',p.type)}${field('标签（逗号分隔）','tags',(p.tags||[]).join('，'))}<label class="field full"><span>产品简介</span><textarea name="description" rows="4" placeholder="简要描述产品特点，客户将在产品卡片与详情页看到">${E(p.description)}</textarea></label></div>${warehouseEditorHTML(p.warehouse)}</section><aside class="panel cat-editor-aside"><div class="cat-edit-cover">${L.image(sourceImage(p),p.name||'产品主图')}</div><h3>产品资料检查</h3><div class="cat-check-item"><span>颜色 / SKU</span><strong>${p.variants.length}</strong></div><div class="cat-check-item"><span>规格字段</span><strong>${p.specs.length}</strong></div><div class="cat-check-item"><span>包装资料</span><strong>${p.packaging.length}</strong></div><p class="muted">在“颜色 / SKU”中设置产品图片。未提供的资料可保持空白。</p></aside></div>${(p.issues||[]).length?`<section class="panel cat-editor-panel cat-source-issues"><h3>原表待核实事项</h3>${p.issues.map(i=>`<div><span class="badge amber">待核实</span><strong>${E(i.field)}</strong><p>${E(i.message)}</p></div>`).join('')}</section>`:''}`;
       if(tab==='specs')body.innerHTML=`<section class="panel cat-editor-panel"><div class="cat-section-head"><div><h3>产品规格</h3><p class="muted">保留原始事实；存在疑问的参数可标记为待核实。</p></div><button class="btn" id="cat-add-spec">＋ 添加字段</button></div><div class="cat-specs">${p.specs.map((s,i)=>`<div class="cat-spec-row" data-spec="${i}">${field('显示名称','label',s.label)}${field('字段名称','key',s.key)}${field('参数值','value',s.value)}<label class="check-row"><input type="checkbox" name="pending" ${s.pending?'checked':''}>待核实</label><button class="icon-btn" data-remove-spec="${i}" aria-label="删除 ${E(s.label)}">×</button></div>`).join('')||empty('还没有规格字段。点击“添加字段”开始填写。')}</div></section>`;
       if(tab==='variants')body.innerHTML=`<section class="panel cat-editor-panel"><div class="cat-section-head"><div><h3>颜色 / SKU</h3><p class="muted">每个颜色版本有独立的货号和图片；货号未提供时保持空白。</p></div><button class="btn" id="cat-add-variant">＋ 添加版本</button></div><div class="cat-variant-edit-grid">${p.variants.map((v,i)=>`<div class="cat-variant-edit" data-variant="${i}"><div class="cat-variant-image">${L.image(v.images?.[0],v.colorLabel||'版本图片')}<button class="btn small" data-pick-variant="${i}">＋ 添加图片</button></div><div class="cat-image-strip">${(v.images||[]).map((url,j)=>`<div><button data-main-image="${i}:${j}" title="${j===0?'当前主图':'设为主图'}" aria-label="${j===0?'当前主图':'设为主图'}">${L.image(url,'版本图片 '+(j+1))}${j===0?'<span>主图</span>':''}</button><button data-remove-image="${i}:${j}" aria-label="移除版本图片 ${j+1}">×</button></div>`).join('')}</div><div class="form-grid">${field('SKU 货号','sku',v.sku)}${field('颜色原名','color',v.color)}${field('颜色显示名','colorLabel',v.colorLabel)}${field('色块','swatch',/^#[0-9a-f]{6}$/i.test(v.swatch||'')?v.swatch:'#bfc0c7','color')}</div><div class="cat-variant-footer"><span class="muted">${v.images?.length||0} 张图片 · 点击缩略图设为主图</span><button class="btn small" data-remove-variant="${i}">移除此版本</button></div></div>`).join('')}</div></section>`;
       if(tab==='packaging')body.innerHTML=`<section class="panel cat-editor-panel"><div class="cat-section-head"><div><h3>包装资料</h3><p class="muted">可填写零售、快递、整箱等包装，并明确适用 SKU。</p></div><button class="btn" id="cat-add-pack">＋ 添加包装</button></div>${p.id==='UQ68'?'<div class="notice">原表快递包装仅适用于 UQ68KB，编辑时请保留适用范围。</div>':''}<div class="cat-pack-grid">${p.packaging.map((v,i)=>`<div class="cat-pack-edit" data-pack="${i}"><div class="cat-pack-image">${L.image(v.image,v.title||'包装图')}<button class="btn small" data-pick-pack="${i}">选择包装图</button></div><div class="cat-pack-fields"><div class="form-grid">${field('包装名称','title',v.title)}${field('适用 SKU（空白为通用）','appliesTo',v.appliesTo)}</div><label class="field"><span>包装内容 / 尺寸 / 重量</span><textarea name="text" rows="5">${E(v.text)}</textarea></label><div class="cat-section-head"><label class="check-row"><input name="pending" type="checkbox" ${v.pending?'checked':''}>待核实</label><button class="btn small" data-remove-pack="${i}">删除包装项</button></div></div></div>`).join('')||empty('尚未录入包装资料。')}</div></section>`;
+      body.querySelector('#cat-add-warehouse')?.addEventListener('click',()=>{if(readonly||busy)return;sync();if(p.warehouse.entries.length>=100){L.toast('仓储信息最多支持 100 个仓库。');return;}p.warehouse.entries.push({location:'',quantity:null});dirty=true;draw();body.querySelectorAll('[name=warehouseLocation]')[p.warehouse.entries.length-1]?.focus();});
+      body.querySelectorAll('[data-remove-warehouse]').forEach(button=>button.onclick=()=>{if(readonly||busy)return;sync();const index=Number(button.dataset.removeWarehouse);p.warehouse.entries.splice(index,1);dirty=true;draw();const fields=body.querySelectorAll('[name=warehouseLocation]');(fields[Math.min(index,fields.length-1)]||body.querySelector('#cat-add-warehouse'))?.focus();});
+      body.querySelectorAll('[name=warehouseLocation],[name=warehouseQuantity]').forEach(input=>input.addEventListener('input',refreshWarehouseTotal));
+      refreshWarehouseTotal();
       if(readonly)body.querySelectorAll('input,textarea,select,button').forEach(x=>x.disabled=true);
       body.querySelector('#cat-add-spec')?.addEventListener('click',()=>{sync();p.specs.push({label:'',key:'',value:'',pending:false});dirty=true;draw();});
       body.querySelectorAll('[data-remove-spec]').forEach(b=>b.onclick=()=>{sync();p.specs.splice(Number(b.dataset.removeSpec),1);dirty=true;draw();});
@@ -211,7 +253,7 @@
     function done(){dirty=false;L.isDirty=null;if(onDone)onDone(p.id);else L.go('/product?id='+encodeURIComponent(p.id));}
     el.querySelector('#cat-back').onclick=()=>{if(!onCancel){L.go('/products');return;}const leave=()=>{dirty=false;L.isDirty=null;onCancel(p.id);};if(dirty)L.confirm('放弃未保存的修改', '返回后，本次尚未保存的产品修改将被放弃。',leave);else leave();};
     el.querySelector('#cat-save').onclick=async()=>{if(busy)return;sync();busy=true;const button=el.querySelector('#cat-save');button.disabled=true;try{if(await saveProduct(p,'draft',context))done();}finally{busy=false;button.disabled=readonly;}};
-    el.querySelector('#cat-editor-publish')?.addEventListener('click',()=>{if(busy)return;sync();confirmPublish(p,done,context);});draw();if(params.get('tab')==='warehouse')body.querySelector('[name=warehouseLocation]')?.focus();
+    el.querySelector('#cat-editor-publish')?.addEventListener('click',()=>{if(busy)return;sync();confirmPublish(p,done,context);});draw();if(params.get('tab')==='warehouse'){body.querySelector('#cat-warehouse-editor')?.scrollIntoView({block:'nearest'});(body.querySelector('[name=warehouseLocation]')||body.querySelector('#cat-add-warehouse'))?.focus();}
   }
   function pickImage(productId,onPick){
     const dialog=L.modal('从素材库选择图片',`<div class="toolbar"><input class="search-input" id="cat-picker-search" aria-label="搜索图片素材" placeholder="搜索文件名"><button class="btn" id="cat-picker-upload" ${!L.can('upload')?'disabled':''}>上传新图片</button></div><p class="muted">可选用未归档图片；保存产品时自动关联所选素材。</p><div class="cat-picker-grid" id="cat-picker-items"></div>`,{wide:true});
@@ -459,7 +501,7 @@
   L.openAssetUpload=openUpload;
   L.openAssetEditor=id=>{if(guard('upload'))openAsset(id);};
   L.renderProductEditor=renderEditor;
-  L.warehouseTools=Object.freeze({normalize:normalizeWarehouse});
+  L.warehouseTools=Object.freeze({normalize:normalizeWarehouse,summaryHTML:warehouseSummaryHTML});
   L.renderDetailEditor=renderDetailEditor;
   L.register('products',{title:'产品资料库',subtitle:'浏览产品、查看规格与相关资料。',banner:true,render:(el,params)=>L.renderCollection(el,params)});
   L.register('editor',{title:'产品资料',subtitle:'将产品事实整理为可复用的资料',render:renderEditor});

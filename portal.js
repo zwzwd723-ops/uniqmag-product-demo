@@ -167,8 +167,8 @@
   };
   L.register('portal',{title:'产品资料库',banner:true,render:el=>L.renderCollection(el)});
   function warehouseHTML(p,staff){
-    let warehouse={};try{warehouse=L.warehouseTools?.normalize(p.warehouse)||{};}catch{/* Invalid legacy warehouse values are never rendered as facts. */}
-    return `<section class="panel product-warehouse" aria-label="仓库"><dl><dt>仓库</dt><dd>${warehouse.location?`<span data-no-translate>${E(warehouse.location)}</span>`:'<span class="product-warehouse-empty">未填写</span>'}</dd></dl>${staff&&L.can('edit')?`<button class="btn small" data-edit-product="warehouse">${L.icon('edit')}编辑仓库</button>`:''}</section>`;
+    let warehouse,error='';try{warehouse=L.warehouseTools.normalize(p.warehouse);}catch{warehouse={entries:[],totalQuantity:0};error='仓储信息待核实';}
+    return `<section class="panel product-warehouse" aria-label="仓储信息"><header class="warehouse-heading"><h3>仓储信息</h3>${staff&&L.can('edit')?`<button class="btn small" data-edit-product="warehouse">${L.icon('edit')}编辑仓储</button>`:''}</header>${warehouse.entries.length?`<table class="warehouse-table"><thead><tr><th scope="col">仓库</th><th scope="col">数量</th></tr></thead><tbody>${warehouse.entries.map(row=>`<tr><td data-no-translate>${E(row.location)}</td><td>${row.quantity===null?'<span class="product-warehouse-empty">未填写</span>':`<span data-no-translate>${row.quantity.toLocaleString('en-US')}</span>`}</td></tr>`).join('')}</tbody></table><div class="warehouse-summary">${L.warehouseTools.summaryHTML(warehouse)}</div>`:`<p class="product-warehouse-empty">${error||'暂未填写仓储信息'}</p>`}</section>`;
   }
   L.register('product',{title:'产品详情',banner:true,render(el,params){
     const staff=L.isStaff(),invite=staff?null:L.currentInvite();if(!staff&&!L.inviteValid(invite)){invalid(el);return;}
